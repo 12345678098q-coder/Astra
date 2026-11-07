@@ -6,6 +6,7 @@ AppId={{F7D3715E-B994-4AA9-8BB7-778402D0D947}
 AppName=Astra
 AppVersion={#AppVersion}
 DefaultDirName={autopf}\Astra
+UsePreviousAppDir=yes
 DefaultGroupName=Astra
 PrivilegesRequired=admin
 ArchitecturesAllowed=x64compatible

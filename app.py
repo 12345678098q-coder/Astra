@@ -839,6 +839,8 @@ if __name__=='__main__':
         attach(w)
     from core.session_recovery import start_recovery
     w.stretch.setChecked(w.settings.value("preview",True,type=bool)); w.actions["stretch"].setChecked(w.stretch.isChecked()); w.showMaximized(); start_recovery(w)
+    from core.app_icon import install_native_window_icon
+    QTimer.singleShot(0,lambda:install_native_window_icon(w))
     from core.github_updates import schedule_startup_check
     schedule_startup_check(w)
     if len(sys.argv)>1:QTimer.singleShot(0,lambda:[w.open_image_path(path) for path in sys.argv[1:]])
