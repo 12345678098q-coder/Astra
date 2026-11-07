@@ -6,7 +6,7 @@ def organize(menu, translate):
     groups=[
         (('Фон и цвет','Background and color'),('фон','градиент','цвет','палитр','кислород','palette','color','background','oxygen','linearfit','scnr')),
         (('Растяжение и контраст','Stretch and contrast'),('растяж','гистограмм','крив','контраст','stretch','histogram','curve','contrast','lhe','hdr')),
-        (('Детали, шум и звёзды','Details, noise and stars'),('шум','звёзд','звезд','смаз','резк','graxpert','rc-astro','starnet','noise','star','detail','sharp','blur','signal booster','деконвол')),
+        (('Детали, шум и звёзды','Details, noise and stars'),('шум','звёзд','звезд','смаз','резк','graxpert','rc-astro','starnet','noise','star','detail','sharp','blur','деконвол')),
         (('Геометрия и исправления','Geometry and corrections'),('кадр','пиксел','кисть','штамп','crop','pixel','heal','clone','defect')),
     ]
     categories=[(menu.addMenu(translate(*names)),terms) for names,terms in groups]

@@ -13,7 +13,6 @@ __pycache__/
 /fixes/
 /build-support/Inno/
 /build-support/astrowizard-inspection/
-/experiments/signal_booster/cuda_runtime/
 *.exe
 *.dll
 *.zip
@@ -32,6 +31,3 @@ __pycache__/
 *.npy
 /PaletteLab/training/
 /experiments/**
-!/experiments/signal_booster/
-!/experiments/signal_booster/*.py
-!/experiments/signal_booster/*.md

@@ -137,7 +137,6 @@ class Window(SaveImageMixin,ProjectMixin,CheckpointMixin,StackPanelMixin,StackFi
         entries=[('open','Открыть','Open',self.open,'Ctrl+O'),('save','Сохранить','Save',self.save,'Ctrl+Shift+S'),('stretch','Предрастяжение','Preview stretch',self.toggle_stretch,'Ctrl+T'),('stack','Сложение','Stacking',self.module.show,'Ctrl+K')]
         processes=self.menuBar().addMenu(self.trtext('Инструменты','Tools'))
         processes.addAction(self.trtext('Усиление кислорода','Oxygen enhancement'),lambda:self.open_tool('native:oxygen'))
-        processes.addAction('Signal Booster',lambda:self.open_tool('native:signal_booster'))
         processes.addAction(self.trtext('Палитра ИИ · Palette Lab','AI palette · Palette Lab'),lambda:self.open_tool('native:palette_ai'))
         processes.addAction(self.trtext('Фон по эталону HiPS','HiPS reference background'),lambda:self.open_tool('native:reference_background'))
         processes.addAction(self.trtext('Восстанавливающая кисть','Healing brush'),lambda:self.open_tool('native:heal'))
@@ -471,7 +470,6 @@ class Window(SaveImageMixin,ProjectMixin,CheckpointMixin,StackPanelMixin,StackFi
     def open_tool(self,key):
         entries={
             'native:oxygen':(self.trtext('Усиление кислорода','Oxygen enhancement'),'OIII',None),
-            'native:signal_booster':('Signal Booster','SB',None),
             'native:palette_ai':(self.trtext('Палитра ИИ · Palette Lab','AI palette · Palette Lab'),'AI-P',None),
             'native:reference_background':(self.trtext('Фон по эталону HiPS','HiPS reference background'),'HiPS',None),
             'native:palettes':(self.trtext('Палитры · Palette Mixer','Palettes · Palette Mixer'),'PAL',None),

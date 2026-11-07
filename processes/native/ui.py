@@ -188,7 +188,7 @@ class BasePanel(QWidget):
         display_range=None;display_stretch=None;stretched=self.key not in ('histogram','mask','curves')
         from core.preview_levels import checkpoint_transfer
         fixed_transfer=checkpoint_transfer(record)
-        if self.key in ('curves','signal_booster'):
+        if self.key == 'curves':
             step=max(1,int(np.ceil(max(data.shape[:2])/1600)));sample=data[::step,::step];finite=sample[np.isfinite(sample)]
             if finite.size:
                 display_range=(min(0.,float(finite.min())),max(1.,float(finite.max())))

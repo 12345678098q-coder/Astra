@@ -64,10 +64,9 @@ class ToolPanel(QFrame):
                 from .palettes.ui import PalettePanel
                 from .palettes.oxygen_ui import OxygenPanel
                 from .palettes.ai_ui import PaletteAI
-                from .native.signal_booster_ui import SignalBoosterPanel
                 from .retouch.ui import RetouchPanel
                 from .reference_background.ui import ReferenceBackgroundPanel
-                native=SignalBoosterPanel(self.window) if code=='signal_booster' else OxygenPanel(self.window) if code=='oxygen' else PaletteAI(self.window) if code=='palette_ai' else ReferenceBackgroundPanel(self.window) if code=='reference_background' else RetouchPanel(self.window,code) if code in ('heal','clone') else PalettePanel(self.window) if code=='palettes' else EdgePanel(self.window) if code=='edges' else SequencePanel(self.window) if code=='sequence' else AdvancedPanel(self.window,code) if code in TITLES else ProcessingPanel(self.window,code) if code in ('histogram','color','defects') else {'motion':MotionPanel,'mask':MaskPanel,'pixelmath':PixelMathPanel,'analysis':AnalysisPanel,'batch':BatchPanel}[code](self.window)
+                native=OxygenPanel(self.window) if code=='oxygen' else PaletteAI(self.window) if code=='palette_ai' else ReferenceBackgroundPanel(self.window) if code=='reference_background' else RetouchPanel(self.window,code) if code in ('heal','clone') else PalettePanel(self.window) if code=='palettes' else EdgePanel(self.window) if code=='edges' else SequencePanel(self.window) if code=='sequence' else AdvancedPanel(self.window,code) if code in TITLES else ProcessingPanel(self.window,code) if code in ('histogram','color','defects') else {'motion':MotionPanel,'mask':MaskPanel,'pixelmath':PixelMathPanel,'analysis':AnalysisPanel,'batch':BatchPanel}[code](self.window)
                 layout.addWidget(native)
             elif key=='graxpert:background-extraction':
                 from .graxpert_background import GraXpertBackgroundPanel
