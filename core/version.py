@@ -1,2 +1,2 @@
 """Public application version, independent of project-file schema versions."""
-VERSION = '1.1.4'
+VERSION = '1.1.5'

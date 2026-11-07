@@ -62,8 +62,13 @@ def stage(folder):
     folder.mkdir(parents=True)
     for name in ('core','processes','modules'):
         for source in (ROOT/name).rglob('*.py'):
+            if 'imported_pixinsight' in source.relative_to(ROOT).parts:continue
             if source.name=='diagnostics.py':continue
             target=folder/source.relative_to(ROOT);target.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(source,target)
+    # Public bundles retain the disabled panel; development sources keep the working booster.
+    placeholder=ROOT/'build-support/signal_booster_placeholder.py'
+    shutil.copy2(placeholder,folder/'processes/native/signal_booster_ui.py')
+    shutil.copy2(ROOT/'core/pixinsight_ui.js',folder/'core/pixinsight_ui.js')
     for name in ('app.py','requirements.txt','requirements-cuda.txt'):shutil.copy2(ROOT/name,folder/name)
     # Inference only; training data and experimental weights are not bundled.
     (folder/'PaletteLab').mkdir()
@@ -76,7 +81,6 @@ def stage(folder):
     subprocess.run([str(compiler),'/nologo','/target:winexe','/platform:x64',
                     '/reference:System.Windows.Forms.dll','/win32icon:'+str(ROOT/'assets/astra.ico'),
                     '/out:'+str(folder/'Astra.exe'),str(ROOT/'build-support/AstraLauncher.cs')],check=True)
-    (folder/'Start-Astra.bat').write_bytes(b'@echo off\r\ncd /d "%~dp0"\r\nset PYTHONDONTWRITEBYTECODE=1\r\nstart "" "%~dp0runtime\\pythonw.exe" "%~dp0app.py"\r\n')
     (folder/'README.txt').write_text('''Astra '''+VERSION+''' — Windows 10/11 x64, portable CPU build
 
 Распакуйте всю папку из архива и запустите Astra.exe.

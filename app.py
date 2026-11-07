@@ -180,6 +180,8 @@ class Window(SaveImageMixin,ProjectMixin,CheckpointMixin,StackPanelMixin,StackFi
         from processes.native.advanced_ui import TITLES
         for code,names in TITLES.items():processes.addAction(self.trtext(*names),lambda checked=False,k=code:self.open_tool('native:'+k))
         from core.menu_order import alphabetize
+        from core.pixinsight_import import install_imported_menu
+        install_imported_menu(plugins,self)
         for menu in (processes,plugins):alphabetize(menu,self.lang)
         from core.tool_categories import organize
         organize(processes,self.trtext)
@@ -303,6 +305,9 @@ class Window(SaveImageMixin,ProjectMixin,CheckpointMixin,StackPanelMixin,StackFi
         QDialog#logOverlay QToolButton#logClose {{font-size:{density['font_points']*1.5:.2f}pt;padding:0;min-width:24px;min-height:24px;}}
         QDockWidget#toolsDock {{border:0;}}
         QFrame#toolsPanelFrame {{border:0;border-left:1px solid {border};border-right:1px solid {border};}}
+        QFrame#toolsHeader {{background:{panel};border:0;border-bottom:1px solid {border};border-radius:0;}}
+        QLabel#toolsHeading {{font-weight:700;font-size:{density['font_points']*1.25:.2f}pt;background:transparent;}}
+        QLabel#toolsTarget {{color:{muted};font-size:{density['font_points']*1.12:.2f}pt;background:transparent;}}
         QFrame#toolSeparator {{background:{border};border:0;}}
         QFrame#imageHistoryPanel {{border:1px solid {border};}}
         QLabel#hero {{font-size:{density['font_points']*1.65:.2f}pt;font-weight:600;}}
@@ -412,8 +417,12 @@ class Window(SaveImageMixin,ProjectMixin,CheckpointMixin,StackPanelMixin,StackFi
         from core.processing_updates import show_update_dialog
         processing_updates=QPushButton(self.trtext('Обновить инструменты обработки','Update processing tools')); processing_updates.clicked.connect(lambda:show_update_dialog(self)); layout.addRow(processing_updates)
         updates=QPushButton(self.trtext('Обновления внешних программ и моделей','External program and model updates')); updates.clicked.connect(self.tool_update_preferences); layout.addRow(updates)
+        from core.github_updates import check_for_updates
+        check_release=QPushButton(self.trtext('Проверить обновления Astra','Check for Astra updates')); check_release.clicked.connect(lambda:check_for_updates(self,manual=True)); layout.addRow(check_release)
         label=QLabel(self.trtext('Изменение языка вступит в силу после перезапуска.','Restart the application to change language.')); layout.addRow(label)
-        buttons=QDialogButtonBox(QDialogButtonBox.Save|QDialogButtonBox.Cancel); buttons.accepted.connect(d.accept); buttons.rejected.connect(d.reject); layout.addRow(buttons)
+        from core.version import VERSION
+        version=QLabel('Astra '+VERSION);version.setAlignment(Qt.AlignLeft|Qt.AlignVCenter);version.setStyleSheet('color:#9ca3aa;font-size:11px;')
+        buttons=QDialogButtonBox(QDialogButtonBox.Save|QDialogButtonBox.Cancel); buttons.accepted.connect(d.accept); buttons.rejected.connect(d.reject); footer=QWidget(); footer_layout=QHBoxLayout(footer);footer_layout.setContentsMargins(0,0,0,0);footer_layout.addWidget(version);footer_layout.addStretch();footer_layout.addWidget(buttons);layout.addRow(footer)
         buttons.button(QDialogButtonBox.Save).setText(self.trtext('Сохранить','Save'))
         buttons.button(QDialogButtonBox.Cancel).setText(self.trtext('Отмена','Cancel'))
         if d.exec():
@@ -503,7 +512,7 @@ class Window(SaveImageMixin,ProjectMixin,CheckpointMixin,StackPanelMixin,StackFi
         if hasattr(self,'actions'):self.actions['stretch'].setChecked(record['stretch'])
         if hasattr(self,'tool_panel'):self.tool_panel.sync_target()
         for document in self.documents:self.update_history(document)
-        if hasattr(self,'target_label'):self.target_label.setText(localize('Активное изображение: ')+window.windowTitle())
+        if hasattr(self,'tool_panel'):self.tool_panel.sync_tool_title()
 
     def set_workspace_split(self,enabled):
         self.mdi.setViewMode(QMdiArea.SubWindowView if enabled else QMdiArea.TabbedView)
@@ -526,6 +535,9 @@ class Window(SaveImageMixin,ProjectMixin,CheckpointMixin,StackPanelMixin,StackFi
         data,count=self.data,self.count
         page=QWidget(); layout=QVBoxLayout(page); layout.setContentsMargins(4,4,4,4)
         info=QLabel(f'{data.shape} · {data.dtype}'); image=ImageView(); image.stretchRequested.connect(self.set_preview_stretch)
+        info.setMinimumWidth(0)
+        info.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Preferred)
+        info.setWordWrap(True)
         split=QSplitter(Qt.Horizontal); history_panel=QFrame(); history_panel.setObjectName('imageHistoryPanel'); history_layout=QVBoxLayout(history_panel); history_layout.setContentsMargins(6,6,6,6)
         history_layout.addWidget(QLabel(self.trtext('История','History'))); history_list=CheckpointList(self); set_em_size(history_list,'setMinimumWidth',5.0); history_layout.addWidget(history_list,1)
         image_panel=QWidget(); image_layout=QVBoxLayout(image_panel); image_layout.setContentsMargins(0,0,0,0); image_layout.addWidget(info); image_layout.addWidget(image,1)
@@ -538,6 +550,7 @@ class Window(SaveImageMixin,ProjectMixin,CheckpointMixin,StackPanelMixin,StackFi
         image.renameRequested.connect(lambda w=window:self.rename_document(w))
         image.splitRequested.connect(lambda w=window:self.split_rgb(w))
         image.luminanceRequested.connect(lambda w=window:self.extract_luminance(w))
+        image.pixelHovered.connect(lambda x,y,w=window:self.show_pixel_info(w,x,y))
         history_list.document=window
         history=ImageHistory(window.windowTitle())
         self.documents[window]={'id':uuid.uuid4().hex,'data':data,'count':count,'image':image,'info':info,'stretch':self.stretch.isChecked(),'strength':self.stretch_strength,'auto_stretch':self.settings.value('preview_auto',True,type=bool),'history':history,'history_list':history_list,'history_panel':history_panel}
@@ -552,6 +565,21 @@ class Window(SaveImageMixin,ProjectMixin,CheckpointMixin,StackPanelMixin,StackFi
             from core.linked_views import join_opened
             join_opened(self,window)
         return window
+
+    def show_pixel_info(self,window,x,y):
+        record=self.documents.get(window)
+        if record is None:return
+        data=record.get('preview_data',record['data'])
+        text=f'{data.shape} · {data.dtype}'
+        if 0<=y<data.shape[0] and 0<=x<data.shape[1]:
+            value=data[y,x]
+            if data.ndim==2:
+                values=f'{self.trtext("Яркость","Value")}: {float(value):.7g}'
+            else:
+                values='  '.join(f'{name}: {float(v):.7g}' for name,v in zip(('R','G','B','A'),value))
+            text+=f'  |  X: {x}  Y: {y}  |  {values}'
+        record['info'].setText(text)
+        record['info'].setToolTip(self.trtext('Координаты от 0. Значения пикселей до предрастяжки просмотра.','Zero-based coordinates. Pixel values before preview stretching.'))
 
     def update_history(self,window):
         if window not in self.documents:return
@@ -788,7 +816,7 @@ if __name__=='__main__':
     from core.mdi_style import AstraStyle
     if sys.platform=='win32':
         import ctypes
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('Astra.Astrophoto')
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('Astra.Astrophotography')
     QApplication.setApplicationVersion(VERSION)
     app=QApplication(sys.argv); app.setWindowIcon(QIcon(str(Path(__file__).parent/'assets/astra.ico'))); app.setStyle(AstraStyle('Fusion')); app.setStyleSheet('''
     QWidget {background:#1b1d20;color:#e4e5e7;font-family:Segoe UI;font-size:13px;}
@@ -811,5 +839,7 @@ if __name__=='__main__':
         attach(w)
     from core.session_recovery import start_recovery
     w.stretch.setChecked(w.settings.value("preview",True,type=bool)); w.actions["stretch"].setChecked(w.stretch.isChecked()); w.showMaximized(); start_recovery(w)
+    from core.github_updates import schedule_startup_check
+    schedule_startup_check(w)
     if len(sys.argv)>1:QTimer.singleShot(0,lambda:[w.open_image_path(path) for path in sys.argv[1:]])
     sys.exit(app.exec())
