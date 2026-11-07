@@ -110,7 +110,7 @@ Third-party tools and optional GPU setup are available in Astra preferences.
 def pack(folder):
     errors=check(folder)
     if errors:raise RuntimeError('\n'.join(errors))
-    archive=folder.with_name(folder.name+'-win64.zip')
+    archive=folder.with_name('Astra-Portable-'+VERSION+'.zip')
     if archive.exists():raise RuntimeError('Archive already exists: '+str(archive))
     with zipfile.ZipFile(archive,'w',zipfile.ZIP_DEFLATED,compresslevel=6) as bundle:
         for path in sorted(folder.rglob('*')):
