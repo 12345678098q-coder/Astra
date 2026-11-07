@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "base_bundle_include_cuda": false,
+  "optional_cuda_directory": "optional/cuda/site-packages",
+  "optional_runtime_requirements": "requirements-cuda.txt",
+  "exclude_distribution_names": ["cupy-cuda12x", "cuda-toolkit", "cuda-pathfinder", "nvidia-*-cu12", "pyinstaller", "pyinstaller-hooks-contrib", "PySide6_Addons", "PySide6_WebEngine", "PySide6_Pdf"],
+  "exclude_site_packages_globs": ["cupy", "cupy-*", "cupy_backends", "cupyx", "cuda", "cuda_*", "nvidia", "nvidia_*", "PyInstaller", "_pyinstaller_hooks_contrib", "pyinstaller*", "altgraph*", "pefile*", "peutils*", "pywin32_ctypes*", "win32ctypes*"],
+  "exclude_project_paths": [".venv", "optional", "build-support", "benchmarks", "screenshots", "release", "__pycache__", "test_*.py", "*.pyc"],
+  "required_bundle_paths": ["requirements.txt", "requirements-cuda.txt", "runtime/python.exe", "runtime/Lib/site-packages/pip"],
+  "notes": "Never include optional/cuda in base ZIP or installer. Apply site-packages exclusions only to staged bundle contents. Keep CPU dependencies, requirements-cuda.txt and pip. Install optional CUDA with --no-deps --target optional/cuda/site-packages. External tools and models are managed separately by Astra; never redistribute activated RC-Astro installations or credentials."
+}

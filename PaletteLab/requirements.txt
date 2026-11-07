@@ -1,0 +1,10 @@
+numpy
+scipy
+PySide6-Essentials
+astropy
+tifffile
+pillow
+threadpoolctl
+psutil
+astroalign==2.6.2
+scikit-image
