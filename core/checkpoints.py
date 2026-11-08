@@ -150,7 +150,7 @@ class DocumentWindow(QMdiSubWindow):
             if not owner.documents:
                 owner.data=None;owner.count=None
                 owner.image=owner.empty_image;owner.info=owner.empty_info;owner.viewwindow=owner.empty_viewwindow
-                owner.tool_panel.target.setText(owner.trtext('Активное изображение: -','Active image: -'))
+                owner.tool_panel.sync_tool_title()
             event.accept();return
         super().closeEvent(event)
     def mousePressEvent(self, event):
@@ -231,14 +231,32 @@ class Workspace(QMdiArea):
         window.setWidget(widget)
         super().addSubWindow(window)
         return window
+    def dropped_images(self,event):
+        from pathlib import Path
+        from core.photo_io import extensions
+        supported={'.fit','.fits','.fts','.tif','.tiff','.xisf',
+                   '.cr2','.cr3','.nef','.arw','.dng','.raf','.rw2','.orf','.pef'}
+        supported.update(extensions())
+        return [url.toLocalFile() for url in event.mimeData().urls()
+                if url.isLocalFile() and Path(url.toLocalFile()).is_file()
+                and Path(url.toLocalFile()).suffix.lower() in supported]
     def dragEnterEvent(self,event):
-        if event.mimeData().hasFormat(MIME):event.setDropAction(Qt.CopyAction);event.accept()
+        if event.mimeData().hasFormat(MIME) or self.dropped_images(event):event.setDropAction(Qt.CopyAction);event.accept()
         else:event.ignore()
     def dragMoveEvent(self,event):
-        if event.mimeData().hasFormat(MIME):
+        if event.mimeData().hasFormat(MIME) or self.dropped_images(event):
             event.setDropAction(Qt.CopyAction);event.accept()
         else:event.ignore()
     def dropEvent(self,event):
+        if not event.mimeData().hasFormat(MIME):
+            paths=self.dropped_images(event)
+            if paths:
+                from PySide6.QtCore import QTimer
+                # Finish the Windows drag session before opening files or dialogs.
+                event.setDropAction(Qt.CopyAction);event.accept()
+                QTimer.singleShot(0,self,lambda:[self.owner.open_image_path(path) for path in paths])
+                return
+            event.ignore();return
         try:
             payload=json.loads(bytes(event.mimeData().data(MIME)))
             for window,record in list(self.owner.documents.items()):
@@ -346,9 +364,17 @@ class CheckpointMixin:
         record=self.documents[window]; data=record['data']; name=window.windowTitle()
         if data.ndim!=3 or data.shape[-1]!=3:
             QMessageBox.information(self,'RGB',self.trtext('Нужно трёхканальное RGB-изображение.','A three-channel RGB image is required.'));return
+        from core.preview_levels import checkpoint_transfer,denoise_limits
+        transfer=checkpoint_transfer(record) or record.get('display_transfer')
+        if record.get('stretch',False) and transfer is None:
+            limits=denoise_limits(record)
+            if limits is not None:transfer=(*limits,record.get('strength',20))
+        display={key:record.get(key,default) for key,default in
+                 (('stretch',False),('strength',20),('auto_stretch',False))}
+        display['transfer']=transfer if display['stretch'] else None
         for index,channel in enumerate('RGB'):
             self.data=data[...,index].copy(); self.count=None; self.next_image_title=name+' · '+channel
-            created=self.showimage(tile=False)
+            created=self.showimage(tile=False,display=display)
             self.documents[created]['channel']=channel
             self.update_history(created)
         self.mdi.tileSubWindows()

@@ -25,7 +25,7 @@ class ProjectMixin:
         return False
 
     def project_work(self,title,callback):
-        dialog=QProgressDialog(title,'',0,0,self);dialog.setCancelButton(None);dialog.setWindowModality(Qt.ApplicationModal);dialog.setMinimumDuration(0)
+        dialog=QProgressDialog(title,'',0,0,self);dialog.setWindowTitle(localize('Открытие...'));dialog.setCancelButton(None);dialog.setWindowModality(Qt.ApplicationModal);dialog.setMinimumDuration(0)
         job=ProjectJob(callback,self);job.note.connect(dialog.setLabelText);job.finished.connect(dialog.accept)
         self.project_io=True
         try:job.start();dialog.exec();job.wait();value,error=job.value,job.error

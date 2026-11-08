@@ -14,6 +14,7 @@ class ImageView(QWidget):
     renameRequested=Signal()
     splitRequested=Signal()
     luminanceRequested=Signal()
+    pixelHovered=Signal(int,int)
     def __init__(self,parent=None):
         super().__init__(parent)
         self.annotations=[];self.annotation_options={};self.annotations_visible=False
@@ -113,6 +114,7 @@ class ImageView(QWidget):
         else:super().mousePressEvent(event)
 
     def mouseMoveEvent(self,event):
+        self.report_pixel(event.position())
         if self.brush_handler is not None and self.pixmap is not None:
             p=(event.position()-self.offset)/self.scale
             p=QPointF(max(0,min(self.source_size.width()-1,p.x())),max(0,min(self.source_size.height()-1,p.y())))
@@ -135,6 +137,18 @@ class ImageView(QWidget):
                 hit=self.crop_hit((event.position()-self.offset)/self.scale)
                 self.setCursor(Qt.SizeAllCursor if hit=='move' else Qt.PointingHandCursor if hit=='rotate' else Qt.SizeFDiagCursor if hit in ('tl','br') else Qt.SizeBDiagCursor if hit else Qt.CrossCursor)
             super().mouseMoveEvent(event)
+    def report_pixel(self,position):
+        if self.pixmap is None or self.scale<=0:
+            self.pixelHovered.emit(-1,-1);return
+        point=(position-self.offset)/self.scale
+        x,y=math.floor(point.x()),math.floor(point.y())
+        if 0<=x<self.source_size.width() and 0<=y<self.source_size.height():
+            self.pixelHovered.emit(x,y)
+        else:self.pixelHovered.emit(-1,-1)
+
+    def leaveEvent(self,event):
+        self.pixelHovered.emit(-1,-1)
+        super().leaveEvent(event)
 
     def mouseReleaseEvent(self,event):
         if event.button()==Qt.LeftButton and self.brush_drawing:

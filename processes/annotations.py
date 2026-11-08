@@ -8,7 +8,7 @@ from astropy.coordinates import SkyCoord
 import astropy.units as u
 from PySide6.QtCore import Qt,QPointF,QRectF
 from PySide6.QtGui import QColor,QPen,QPolygonF,QPainter
-from PySide6.QtWidgets import QWidget,QVBoxLayout,QFormLayout,QCheckBox,QSpinBox,QPushButton,QColorDialog,QFileDialog,QLabel,QMessageBox
+from PySide6.QtWidgets import QWidget,QVBoxLayout,QFormLayout,QCheckBox,QSpinBox,QPushButton,QColorDialog,QFileDialog,QLabel,QMessageBox,QSizePolicy
 from .astap_updates import HOME
 
 def catalog_path():
@@ -71,6 +71,7 @@ def paint_annotations(painter,items,options,scale=1):
 class AnnotationPanel(QWidget):
     def __init__(self,window):
         super().__init__();self.window=window;layout=QVBoxLayout(self);layout.addWidget(QLabel(localize('Подписи объектов')))
+        self.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Preferred)
         self.controls={};form=QFormLayout();layout.addLayout(form)
         for key,label in [('stars',localize('Именованные звёзды')),('deep',localize('Объекты глубокого космоса')),('outlines',localize('Контуры объектов')),('aliases',localize('Альтернативные названия'))]:
             control=QCheckBox(label);control.setChecked(window.settings.value('annotation/'+key,key!='aliases',type=bool));control.setToolTip(label+localize(' на основе каталога ASTAP.'));form.addRow(control);self.controls[key]=control;control.toggled.connect(self.save)

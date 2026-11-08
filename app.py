@@ -123,6 +123,7 @@ class Window(SaveImageMixin,ProjectMixin,CheckpointMixin,StackPanelMixin,StackFi
         filemenu.addAction(self.trtext('Сохранить проект','Save project'),self.save_project,'Ctrl+S')
         filemenu.addAction(self.trtext('Сохранить проект как','Save project as'),lambda:self.save_project(True),'Ctrl+Alt+S')
         filemenu.addSeparator()
+        filemenu.addAction(self.trtext('Закрыть все фото','Close all images'),self.close_all_images)
         editmenu=self.menuBar().addMenu(self.trtext('Правка','Edit'))
         for key,ru,en,shortcut,symbol,delta in [('undo','Отменить','Undo','Ctrl+Z','↶',-1),('redo','Повторить','Redo','Ctrl+Shift+Z','↷',1)]:
             action=QAction(self.trtext(ru,en),self); action.setShortcut(shortcut); action.setEnabled(False)
@@ -137,6 +138,7 @@ class Window(SaveImageMixin,ProjectMixin,CheckpointMixin,StackPanelMixin,StackFi
         entries=[('open','Открыть','Open',self.open,'Ctrl+O'),('save','Сохранить','Save',self.save,'Ctrl+Shift+S'),('stretch','Предрастяжение','Preview stretch',self.toggle_stretch,'Ctrl+T'),('stack','Сложение','Stacking',self.module.show,'Ctrl+K')]
         processes=self.menuBar().addMenu(self.trtext('Инструменты','Tools'))
         processes.addAction(self.trtext('Усиление кислорода','Oxygen enhancement'),lambda:self.open_tool('native:oxygen'))
+        processes.addAction('Signal Booster',lambda:self.open_tool('native:signal_booster'))
         processes.addAction(self.trtext('Палитра ИИ · Palette Lab','AI palette · Palette Lab'),lambda:self.open_tool('native:palette_ai'))
         processes.addAction(self.trtext('Фон по эталону HiPS','HiPS reference background'),lambda:self.open_tool('native:reference_background'))
         processes.addAction(self.trtext('Восстанавливающая кисть','Healing brush'),lambda:self.open_tool('native:heal'))
@@ -470,6 +472,7 @@ class Window(SaveImageMixin,ProjectMixin,CheckpointMixin,StackPanelMixin,StackFi
     def open_tool(self,key):
         entries={
             'native:oxygen':(self.trtext('Усиление кислорода','Oxygen enhancement'),'OIII',None),
+            'native:signal_booster':('Signal Booster','SB',None),
             'native:palette_ai':(self.trtext('Палитра ИИ · Palette Lab','AI palette · Palette Lab'),'AI-P',None),
             'native:reference_background':(self.trtext('Фон по эталону HiPS','HiPS reference background'),'HiPS',None),
             'native:palettes':(self.trtext('Палитры · Palette Mixer','Palettes · Palette Mixer'),'PAL',None),
@@ -529,7 +532,7 @@ class Window(SaveImageMixin,ProjectMixin,CheckpointMixin,StackPanelMixin,StackFi
         for window in self.mdi.subWindowList():
             if window.isMinimized():window.raise_()
 
-    def showimage(self,tile=True):
+    def showimage(self,tile=True,display=None):
         data,count=self.data,self.count
         page=QWidget(); layout=QVBoxLayout(page); layout.setContentsMargins(4,4,4,4)
         info=QLabel(f'{data.shape} · {data.dtype}'); image=ImageView(); image.stretchRequested.connect(self.set_preview_stretch)
@@ -552,6 +555,13 @@ class Window(SaveImageMixin,ProjectMixin,CheckpointMixin,StackPanelMixin,StackFi
         history_list.document=window
         history=ImageHistory(window.windowTitle())
         self.documents[window]={'id':uuid.uuid4().hex,'data':data,'count':count,'image':image,'info':info,'stretch':self.stretch.isChecked(),'strength':self.stretch_strength,'auto_stretch':self.settings.value('preview_auto',True,type=bool),'history':history,'history_list':history_list,'history_panel':history_panel}
+        if display is not None:
+            record=self.documents[window]
+            record.update({key:display[key] for key in ('stretch','strength','auto_stretch')})
+            transfer=display.get('transfer')
+            if transfer is not None:
+                token=history.entries[history.index].setdefault('token',uuid.uuid4().hex)
+                record['preview_ranges']={token:transfer}
         from core.linked_views import synchronize
         image.viewportChanged.connect(lambda w=window:synchronize(self,w))
         history_panel.setVisible(self.history_view_action.isChecked())
@@ -638,8 +648,10 @@ class Window(SaveImageMixin,ProjectMixin,CheckpointMixin,StackPanelMixin,StackFi
         denoising=label.lower().replace(' ','') in ('rcastro:nxt','graxpert:denoising','nxt','noisexterminator')
         transfer=checkpoint_transfer(record) if record.get('stretch',False) else None
         if transfer is None and denoising and record.get('stretch',False):
-            limits=denoise_limits(record)
-            if limits is not None:transfer=(*limits,record.get('strength',20))
+            transfer=record.get('display_transfer')
+            if transfer is None:
+                limits=denoise_limits(record)
+                if limits is not None:transfer=(*limits,record.get('strength',20))
         record['history'].commit(record['data'],record['count'],data,coverage,label)
         self.checkpoint_selection={}
         if link_group and previous_entry.get('link_id'):
@@ -714,6 +726,8 @@ class Window(SaveImageMixin,ProjectMixin,CheckpointMixin,StackPanelMixin,StackFi
             if updating_controls:
                 self.stretch_strength=strength
                 if hasattr(self,'tool_panel'):self.tool_panel.sync_target()
+        if enabled and record and record.get('preview_owner') is None:
+            record['display_transfer']=(float(lo),float(hi),strength)
         source_size=QSize(source.shape[1],source.shape[0])
         if self.settings.value('preview/low_resolution',False,type=bool):
             source=source[::step,::step]
@@ -773,6 +787,11 @@ class Window(SaveImageMixin,ProjectMixin,CheckpointMixin,StackPanelMixin,StackFi
 
     def save(self):
         return self.save_document(self.mdi.activeSubWindow())
+    def close_all_images(self):
+        for window in list(self.documents):
+            if not window.close():
+                break
+
     def restart_application(self):
         if heavy_job_running(self) or (getattr(self,'tool_update_job',None) and self.tool_update_job.isRunning()):
             QMessageBox.information(self,'Astra',self.trtext('Дождитесь завершения обработки или обновления перед перезапуском.','Wait for processing or updates to finish before restarting.')); return

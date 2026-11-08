@@ -22,16 +22,21 @@ def localize(source, english=None):
 
 
 def configure_interface(settings):
-    """Select the saved language before constructing any widgets."""
+    """Initialize from the OS once, then keep the user's saved language."""
     from PySide6.QtCore import QCoreApplication, QLibraryInfo, QLocale, Qt, QTranslator
 
-    code = set_language(settings.value('language', 'ru'))
+    system_languages = QLocale.system().uiLanguages()
+    if not settings.contains('language'):
+        primary = system_languages[0] if system_languages else QLocale.system().name()
+        detected = 'ru' if primary.replace('_', '-').split('-')[0].lower() == 'ru' else 'en'
+        settings.setValue('language', detected)
+    code = set_language(settings.value('language'))
     app = QCoreApplication.instance()
     if getattr(app, '_astra_language', None) == code:
         return code
     locale = QLocale(code)
     QLocale.setDefault(locale)
-    # Keep native Windows open/save dialogs for both interface languages.
+    # Keep Windows native dialogs for every interface language.
     app.setAttribute(Qt.AA_DontUseNativeDialogs, False)
     previous = getattr(app, '_astra_translator', None)
     if previous is not None:

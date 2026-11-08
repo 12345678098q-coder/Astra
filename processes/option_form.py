@@ -33,6 +33,8 @@ class OptionForm(QWidget):
             else:
                 caption=FormCaption(label);caption.setWordWrap(True);caption.setToolTip(field.toolTip());layout.addRow(caption,field)
             if key=='rcastro:nxt' and option.name=='strength':
+                caption.setWordWrap(False)
+                caption.setMinimumWidth(caption.fontMetrics().horizontalAdvance(label)+4)
                 layout.removeWidget(field)
                 wrapper=QWidget();row=QHBoxLayout(wrapper);row.setContentsMargins(0,0,0,0)
                 field.setSuffix(' %');field.setProperty('astra_keep_width',True)

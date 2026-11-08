@@ -11,6 +11,7 @@ def auto_settings(data,target=.25):
     if high<=low:low=float(finite.min());high=float(finite.max())
     if high<=low:high=low+max(1,abs(low))*1e-6
     black=max(low,median-2.8*mad);black=min(black,median)
+    if high<=black:high=black+max(1.,abs(black))*1e-6
     x=float(np.clip((median-black)/(high-black),1e-6,1-1e-6))
     mid=float(np.clip(x*(target-1)/(2*x*target-x-target),.001,.999))
     return {'channels':{'All':{'black':black,'white':high,'mid':mid,'curve':'0:0;1:1'}}}

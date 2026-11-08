@@ -77,6 +77,7 @@ def make_footer(page):
         for button in ([chosen] if chosen is not None else []):
             hidden=button.isHidden() and button.objectName()=='starnet_cancel'
             button.setParent(footer);footer.controls.append(button);footer.grid.addWidget(button)
+            button.setSizePolicy(QSizePolicy.Preferred,QSizePolicy.Fixed)
             if not hidden:button.show()
     QTimer.singleShot(0,footer,footer.reflow)
     return footer

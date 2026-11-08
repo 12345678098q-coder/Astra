@@ -25,6 +25,18 @@ class CropPanel(QWidget):
         self.preset.currentIndexChanged.connect(self.ratio_changed);self.orientation.currentIndexChanged.connect(self.ratio_changed)
         self.rotation_label=QLabel(window.trtext('Угол рамки: 0°','Frame angle: 0°'));layout.addWidget(self.rotation_label)
         reset_angle=QPushButton(window.trtext('Сбросить поворот рамки','Reset frame rotation'));reset_angle.clicked.connect(self.reset_rotation);layout.addWidget(reset_angle)
+        transforms=QVBoxLayout()
+        layout.addLayout(transforms)
+        for operation,ru,en in (
+            ('left','↶ 90° влево','↶ 90° left'),
+            ('right','↷ 90° вправо','↷ 90° right'),
+            ('horizontal','Отразить по горизонтали','Flip horizontally'),
+            ('vertical','Отразить по вертикали','Flip vertically')):
+            button=QPushButton(window.trtext(ru,en))
+            button.setProperty('linkedAction',True)
+            button.setToolTip(window.trtext('Применить ко всему фото и добавить шаг истории.','Apply to the whole image and add a history step.'))
+            button.clicked.connect(lambda checked=False,op=operation:self.transform(op))
+            transforms.addWidget(button)
         self.auto_rotate=QCheckBox(window.trtext('Автоповорот','Auto rotate'));layout.addWidget(self.auto_rotate)
         auto=QPushButton(window.trtext('Автокроп','Auto crop'));auto.clicked.connect(self.auto_crop);layout.addWidget(auto)
         for ru,en,callback in [('По центру','Center',self.center),('Предпросмотр','Preview',self.preview),('Отмена','Cancel',self.cancel),('Сбросить область','Reset region',self.reset),('Применить кроп','Apply crop',self.apply)]:
@@ -38,6 +50,35 @@ class CropPanel(QWidget):
             height,width=record['data'].shape[:2]
             return width/height if height else 0
         return 1/ratio if ratio and self.orientation.currentIndex() else ratio
+    def transform(self,operation):
+        import numpy as np
+        window=self.window
+        source=window.mdi.activeSubWindow()
+        record=window.documents.get(source)
+        if record is None:return
+        if heavy_job_running(window):
+            QMessageBox.information(self,'Astra',localize('Дождитесь завершения обработки.'));return
+        labels={
+            'left':('Поворот 90° влево','Rotate 90° left'),
+            'right':('Поворот 90° вправо','Rotate 90° right'),
+            'horizontal':('Отражение по горизонтали','Flip horizontally'),
+            'vertical':('Отражение по вертикали','Flip vertically')}
+        def convert(array):
+            if array is None:return None
+            if operation in ('left','right'):
+                return np.rot90(array,1 if operation=='left' else -1,axes=(0,1)).copy()
+            return np.flip(array,axis=1 if operation=='horizontal' else 0).copy()
+        try:
+            coverage=record['count']
+            require_memory(record['data'].nbytes+(coverage.nbytes if coverage is not None else 0),window.trtext(*labels[operation]))
+            data=convert(record['data'])
+            count=convert(coverage)
+            window.apply_image_result(source,data,window.trtext(*labels[operation]),count)
+            view=record['image']
+            view.crop_rect=None;view.crop_angle=0.
+            self.sync(True)
+            view.fit_image()
+        except Exception as error:QMessageBox.warning(self,'Astra',str(error))
     def new_frame(self):
         self.sync(True)
         if self.view is not None:

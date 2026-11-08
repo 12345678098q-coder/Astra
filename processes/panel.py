@@ -18,13 +18,18 @@ class ToolPanel(QFrame):
         from core.tool_actions import ToolActions
         self.tool_actions=ToolActions(window)
         root=QHBoxLayout(self);root.setContentsMargins(0,0,0,0);root.setSpacing(0)
-        content=QVBoxLayout();self.content_layout=content;content.setContentsMargins(12,8,12,8);root.addLayout(content,1)
-        content.addWidget(QLabel(window.trtext('Инструменты','Tools')))
-        self.target=QLabel('');self.target.setWordWrap(True);self.target.setMinimumWidth(0);self.target.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Preferred);content.addWidget(self.target)
-        self.pages=QStackedWidget();self.pages.setMinimumWidth(0);self.pages.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Expanding); self.empty=QLabel(localize('Откройте инструмент через меню «Инструменты»')); self.empty.setWordWrap(True); self.pages.addWidget(self.empty);content.addWidget(self.pages,1)
+        content=QVBoxLayout();self.content_layout=content;content.setContentsMargins(0,0,0,8);content.setSpacing(0);root.addLayout(content,1)
+        header=QFrame();header.setObjectName('toolsHeader');header_layout=QVBoxLayout(header)
+        header_layout.setContentsMargins(14,10,14,11);header_layout.setSpacing(5)
+        heading=QLabel(window.trtext('Инструменты','Tools'));heading.setObjectName('toolsHeading');header_layout.addWidget(heading)
+        self.target=QLabel('')
+        self.target.setObjectName('toolsTarget');self.target.setWordWrap(True);self.target.setMinimumWidth(0)
+        self.target.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Preferred);header_layout.addWidget(self.target)
+        content.addWidget(header)
+        self.pages=QStackedWidget();self.pages.setMinimumWidth(0);self.pages.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Expanding); self.empty=QLabel(localize('Откройте инструмент через меню «Инструменты»')); self.empty.setWordWrap(True); self.pages.addWidget(self.empty);self.pages.setContentsMargins(12,8,12,0);content.addWidget(self.pages,1)
         self.separator=QFrame();self.separator.setObjectName('toolSeparator');self.separator.setFrameShape(QFrame.VLine);self.separator.setFixedWidth(1);root.addWidget(self.separator)
         self.buttons=QButtonGroup(self);self.buttons.setExclusive(True);self.forms={}
-        self.pages.currentChanged.connect(lambda:self.sync_crop())
+        self.pages.currentChanged.connect(lambda:self.sync_crop());self.pages.currentChanged.connect(self.sync_tool_title)
         self.rail_scroll=QScrollArea();self.rail_scroll.setObjectName('toolRailScroll')
         self.rail_scroll.setWidgetResizable(True);self.rail_scroll.setFrameShape(QFrame.NoFrame)
         self.rail_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -32,6 +37,14 @@ class ToolPanel(QFrame):
         rail_widget=QWidget();self.rail=QVBoxLayout(rail_widget)
         self.rail.setContentsMargins(8,8,8,8);self.rail.addStretch()
         self.rail_scroll.setWidget(rail_widget);root.addWidget(self.rail_scroll)
+
+    def sync_tool_title(self,*_):
+        current=self.pages.currentWidget()
+        for page,button in self.entries.values():
+            if page is current:
+                self.target.setText(page.property('astra_tool_title') or '')
+                return
+        self.target.clear()
 
     def sync_crop(self):
         if 'graxpert:background-extraction' in self.entries:
@@ -52,7 +65,7 @@ class ToolPanel(QFrame):
 
     def open_tool(self,key,title,short,callback=None):
         if key not in self.entries:
-            page=QWidget(); layout=QVBoxLayout(page); heading=QLabel(title); layout.addWidget(heading)
+            page=QWidget(); layout=QVBoxLayout(page)
             if key.startswith('native:'):
                 from .native.ui import ProcessingPanel,MaskPanel,PixelMathPanel
                 from .native.motion_ui import MotionPanel
@@ -64,9 +77,10 @@ class ToolPanel(QFrame):
                 from .palettes.ui import PalettePanel
                 from .palettes.oxygen_ui import OxygenPanel
                 from .palettes.ai_ui import PaletteAI
+                from .native.signal_booster_ui import SignalBoosterPanel
                 from .retouch.ui import RetouchPanel
                 from .reference_background.ui import ReferenceBackgroundPanel
-                native=OxygenPanel(self.window) if code=='oxygen' else PaletteAI(self.window) if code=='palette_ai' else ReferenceBackgroundPanel(self.window) if code=='reference_background' else RetouchPanel(self.window,code) if code in ('heal','clone') else PalettePanel(self.window) if code=='palettes' else EdgePanel(self.window) if code=='edges' else SequencePanel(self.window) if code=='sequence' else AdvancedPanel(self.window,code) if code in TITLES else ProcessingPanel(self.window,code) if code in ('histogram','color','defects') else {'motion':MotionPanel,'mask':MaskPanel,'pixelmath':PixelMathPanel,'analysis':AnalysisPanel,'batch':BatchPanel}[code](self.window)
+                native=SignalBoosterPanel(self.window) if code=='signal_booster' else OxygenPanel(self.window) if code=='oxygen' else PaletteAI(self.window) if code=='palette_ai' else ReferenceBackgroundPanel(self.window) if code=='reference_background' else RetouchPanel(self.window,code) if code in ('heal','clone') else PalettePanel(self.window) if code=='palettes' else EdgePanel(self.window) if code=='edges' else SequencePanel(self.window) if code=='sequence' else AdvancedPanel(self.window,code) if code in TITLES else ProcessingPanel(self.window,code) if code in ('histogram','color','defects') else {'motion':MotionPanel,'mask':MaskPanel,'pixelmath':PixelMathPanel,'analysis':AnalysisPanel,'batch':BatchPanel}[code](self.window)
                 layout.addWidget(native)
             elif key=='graxpert:background-extraction':
                 from .graxpert_background import GraXpertBackgroundPanel
@@ -177,11 +191,11 @@ class ToolPanel(QFrame):
             button.customContextMenuRequested.connect(lambda pos,k=key:self.tool_context_menu(k,pos))
             from .action_footer import make_footer
             footer=make_footer(page)
-            container=QWidget();container_layout=QVBoxLayout(container);container_layout.setContentsMargins(0,0,0,0);container_layout.addWidget(scroll,1)
+            container=QWidget();container.setProperty('astra_tool_title',title);container_layout=QVBoxLayout(container);container_layout.setContentsMargins(0,0,0,0);container_layout.addWidget(scroll,1)
             if footer is not None:container_layout.addWidget(footer)
             from .action_footer import APPLY
             for control in container.findChildren(QPushButton):
-                if control.text() in APPLY:
+                if control.text() in APPLY or control.property('linkedAction'):
                     control.setProperty('applyDrag',True)
                     self.tool_actions.register(control)
             self.pages.addWidget(container)

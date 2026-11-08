@@ -10,6 +10,7 @@ PRESETS={
 
 def metrics(settings):
  key=str(settings.value('interface/density','normal'))
+ if key=='spacious':key='normal'
  try:font=max(10,min(18,int(settings.value('interface/font_size',12))))
  except (ValueError,TypeError):font=12
  values={**PRESETS.get(key,PRESETS['normal']),'min_height':14 if key=='compact' else 24 if key=='spacious' else 20}
@@ -45,9 +46,10 @@ def adjust_widgets(window):
 def show_interface_settings(window):
  settings=window.settings;tr=window.trtext
  original=(settings.value('interface/density','normal'),settings.value('interface/font_size',12))
+ if original[0]=='spacious':original=('normal',original[1])
  dialog=QDialog(window);dialog.setWindowTitle(tr('Настройка интерфейса','Interface settings'));layout=QVBoxLayout(dialog);form=QFormLayout();layout.addLayout(form)
  density=QComboBox()
- for key,ru,en in [('compact','Компактный','Compact'),('normal','Обычный','Normal'),('spacious','Просторный','Spacious')]:density.addItem(tr(ru,en),key)
+ for key,ru,en in [('compact','Компактный','Compact'),('normal','Обычный','Normal')]:density.addItem(tr(ru,en),key)
  density.setCurrentIndex(max(0,density.findData(original[0])));form.addRow(tr('Плотность элементов','Control density'),density)
  font=QDoubleSpinBox();font.setRange(10/12,18/12);font.setDecimals(2);font.setSingleStep(1/12);font.setValue(metrics(settings)['font']/12);font.setSuffix(' ×');form.addRow(tr('Масштаб текста','Text scale'),font)
  note=QLabel(tr('Изменения видны сразу. Обычный режим сохраняет прежние размеры. Размер текста настраивается отдельно от плотности.','Changes appear immediately. Normal preserves previous dimensions. Text size is independent of control density.'));note.setWordWrap(True);layout.addWidget(note)

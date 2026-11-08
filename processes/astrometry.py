@@ -7,7 +7,7 @@ from astropy.io import fits
 from astropy.wcs import WCS
 from astropy.wcs.utils import proj_plane_pixel_scales
 from PySide6.QtCore import QProcess
-from PySide6.QtWidgets import QWidget,QVBoxLayout,QFormLayout,QLineEdit,QPushButton,QDoubleSpinBox,QSpinBox,QLabel,QFileDialog,QMessageBox
+from PySide6.QtWidgets import QWidget,QVBoxLayout,QFormLayout,QLineEdit,QPushButton,QDoubleSpinBox,QSpinBox,QLabel,QFileDialog,QMessageBox,QSizePolicy
 from core.resources import heavy_job_running,configure_external
 
 def solution(header,shape):
@@ -23,6 +23,7 @@ def solution(header,shape):
 class AstrometryPanel(QWidget):
     def __init__(self,window):
         super().__init__();self.window=window
+        self.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Preferred)
         layout=QVBoxLayout(self);form=QFormLayout();layout.addLayout(form)
         from .tool_updates import find_tool
         self.astap_status=QLabel();self.astap_status.setOpenExternalLinks(False)
@@ -60,9 +61,7 @@ class AstrometryPanel(QWidget):
         found=find_tool('astap',configured)
         self.astap_status.setText(self.window.trtext('ASTAP выбран: ','ASTAP selected: ')+str(found) if found and found.is_file() else self.window.trtext('ASTAP не выбран. <a href="settings">Открыть настройки</a>','ASTAP not selected. <a href="settings">Open settings</a>'))
     def update_solve_button(self):
-        source=self.window.mdi.activeSubWindow()
-        solved=bool(self.window.documents.get(source,{}).get('wcs_header'))
-        self.solve_button.setText(self.window.trtext('Обновить координаты','Update coordinates') if solved else self.window.trtext('Определить координаты','Solve coordinates'))
+        self.solve_button.setText(self.window.trtext('Определить координаты','Solve coordinates'))
     def save_settings(self):
         for key,field in self.fields.items():self.window.settings.setValue('astrometry/'+key,field.value())
     def cancel(self):

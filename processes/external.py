@@ -92,7 +92,7 @@ class ExternalProcessMixin:
                             enabled=record.get('stretch',False)
                             if limits is not None:
                                 strength=record.get('strength',20)
-                                display_stretch=(*limits,strength)
+                                display_stretch=record.get('display_transfer',(*limits,strength))
                         show_preview(self,result,source_window.windowTitle()+' · '+tool,enabled,source=source_window,display_stretch=display_stretch)
                     else:self.apply_image_result(source_window,result,tool+': '+operation)
                     if extra and not preview:
