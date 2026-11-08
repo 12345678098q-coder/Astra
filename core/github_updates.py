@@ -4,7 +4,7 @@ import re
 
 from PySide6.QtCore import QTimer, QUrl
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest
+from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
 from PySide6.QtWidgets import QCheckBox, QDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
 
 from core.version import VERSION
@@ -49,7 +49,7 @@ def check_for_updates(window, manual=False):
 
     def finished():
         try:
-            if reply.error():
+            if reply.error() != QNetworkReply.NoError:
                 raise RuntimeError(reply.errorString())
             data = json.loads(bytes(reply.readAll()))
             version = str(data.get('tag_name', '')).lstrip('v')
