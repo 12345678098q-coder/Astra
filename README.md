@@ -28,6 +28,8 @@ Astra is Windows astrophotography stacking and processing software with a user-f
 - Integration with GraXpert, StarNet, ASTAP and RC-Astro tools.
 - Optional NVIDIA GPU acceleration for selected operations.
 
+![Astra с открытым стеком / Astra with an open stack](screenshots/stack-module.png)
+
 ## Установка и запуск
 
 Для установки Astra скачайте установщик и следуйте его инструкциям. Для установки portable-версии распакуйте архив в удобную папку и запустите `Astra.exe`.
