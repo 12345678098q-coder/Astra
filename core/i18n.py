@@ -31,11 +31,8 @@ def configure_interface(settings):
         return code
     locale = QLocale(code)
     QLocale.setDefault(locale)
-    # Native file and color dialogs use the operating system's display language.
-    system_languages = QLocale.system().uiLanguages()
-    if system_languages:
-        system_code = QLocale(system_languages[0]).language()
-        app.setAttribute(Qt.AA_DontUseNativeDialogs, system_code != locale.language())
+    # Keep native Windows open/save dialogs for both interface languages.
+    app.setAttribute(Qt.AA_DontUseNativeDialogs, False)
     previous = getattr(app, '_astra_translator', None)
     if previous is not None:
         app.removeTranslator(previous)
