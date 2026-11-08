@@ -1,5 +1,7 @@
 import tempfile
 from pathlib import Path
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import numpy as np
 from astropy.io import fits
 from modules.stacking.engine import stack,combine,compute_backend

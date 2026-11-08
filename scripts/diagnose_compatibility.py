@@ -8,7 +8,8 @@ import sys
 import tempfile
 import time
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
 os.environ['ASTRA_COMPATIBILITY'] = '1'
 os.environ['PYTHONIOENCODING'] = 'utf-8'
 from core.compatibility import configure_startup
