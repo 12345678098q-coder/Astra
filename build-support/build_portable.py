@@ -66,6 +66,8 @@ def stage(folder):
             if source.name=='diagnostics.py':continue
             target=folder/source.relative_to(ROOT);target.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(source,target)
     # Public bundles retain the disabled panel; development sources keep the working booster.
+    placeholder=ROOT/'build-support/signal_booster_placeholder.py'
+    shutil.copy2(placeholder,folder/'processes/native/signal_booster_ui.py')
     shutil.copy2(ROOT/'core/pixinsight_ui.js',folder/'core/pixinsight_ui.js')
     for name in ('app.py','requirements.txt','requirements-cuda.txt'):shutil.copy2(ROOT/name,folder/name)
     # Inference only; training data and experimental weights are not bundled.
@@ -115,6 +117,7 @@ def pack(folder):
     with zipfile.ZipFile(archive,'w',zipfile.ZIP_DEFLATED,compresslevel=6) as bundle:
         for path in sorted(folder.rglob('*')):
             if not path.is_file() or '__pycache__' in path.parts or path.suffix=='.pyc':continue
+            if path.relative_to(folder).parts[0] in ('tools','optional'):continue
             bundle.write(path,folder.name+'/'+path.relative_to(folder).as_posix())
     with zipfile.ZipFile(archive) as bundle:
         error=bundle.testzip()
