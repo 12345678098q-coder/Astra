@@ -9,8 +9,8 @@ from PySide6.QtWidgets import QCheckBox, QDialog, QHBoxLayout, QLabel, QPushButt
 
 from core.version import VERSION
 
-RELEASES_URL = 'https://github.com/12345678098q-coder/Astra/releases'
-API_URL = 'https://api.github.com/repos/12345678098q-coder/Astra/releases/latest'
+RELEASES_URL = 'https://github.com/yazdes4/Astra/releases'
+API_URL = 'https://api.github.com/repos/yazdes4/Astra/releases/latest'
 
 
 def version_tuple(value):
