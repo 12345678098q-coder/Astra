@@ -5,10 +5,11 @@ import json
 from pathlib import Path
 import numpy as np
 from shiboken6 import isValid
-from PySide6.QtCore import Qt,QPointF,QRectF,QRect,QTimer
-from PySide6.QtGui import QPainter,QColor,QPen,QPolygonF
+from PySide6.QtCore import Qt,QPointF,QRectF,QRect,QTimer,Signal
+from PySide6.QtGui import QPainter,QColor,QPen,QPolygonF,QPainterPath
 from PySide6.QtWidgets import *
 from . import processing as engine
+from .autostretch import DEFAULT_TARGET,auto_settings
 from .jobs import launch,cancel
 
 class HistogramPlot(QWidget):
@@ -22,9 +23,12 @@ class HistogramPlot(QWidget):
     def wheelEvent(self,event):
         if not self.values or not event.angleDelta().y():return
         low,high=self.bounds();full_low,full_high=self.full_bounds()
-        fraction=float(np.clip((event.position().x()-3)/max(1,self.width()-6),0,1));anchor=low+fraction*(high-low)
         span=float(np.clip((high-low)*2**(-event.angleDelta().y()/360), (full_high-full_low)/10000,full_high-full_low))
-        start=float(np.clip(anchor-fraction*span,full_low,full_high-span));self.views[self.channel]=(start,start+span)
+        if span>=full_high-full_low:
+            self.views.pop(self.channel,None)
+        else:
+            start=low if event.position().x()<self.width()/2 else high-span
+            start=float(np.clip(start,full_low,full_high-span));self.views[self.channel]=(start,start+span)
         self.update();event.accept()
     def mouseDoubleClickEvent(self,event):
         self.views.pop(self.channel,None);self.update();event.accept()
@@ -38,18 +42,29 @@ class HistogramPlot(QWidget):
         black,mid,white=self.positions()
         mid=float(np.clip(mid,left+14,right-14))
         return (float(np.clip(black,left,mid-14)),mid,float(np.clip(white,mid+14,right)))
+    def histogram_curve(self):
+        # Build the curve from fixed bins over the whole channel. Rebinning a
+        # narrow viewport produces sparse spikes and changes their height.
+        channels=self.values['bins']
+        bins=np.asarray(channels[min(self.channel,len(channels)-1)],float)
+        padded=np.pad(bins,1,mode='edge')
+        heights=np.log1p(np.convolve(padded,[.25,.5,.25],mode='valid'))
+        return np.linspace(*self.full_bounds(),len(bins)),heights/max(1.,heights.max())
     def paintEvent(self,event):
-        p=QPainter(self);p.fillRect(self.rect(),QColor('#24282b'));p.setPen(QColor('#93a1ac'));p.drawRect(self.rect().adjusted(1,1,-2,-2))
+        p=QPainter(self);p.setRenderHint(QPainter.Antialiasing);p.fillRect(self.rect(),QColor('#24282b'));p.setPen(QColor('#93a1ac'));p.drawRect(self.rect().adjusted(1,1,-2,-2))
         if not self.values:return
-        low,high=self.bounds();full_low,full_high=self.full_bounds()
-        samples=self.values.get('samples')
-        if samples is not None:
-            a=samples[min(self.channel,len(samples)-1)];bins=np.histogram(a,256,range=(low,high))[0];xs=np.linspace(3,self.width()-3,256)
-        else:
-            bins=np.asarray(self.values['bins'][min(self.channel,len(self.values['bins'])-1)],float);xs=3+(np.linspace(full_low,full_high,len(bins))-low)/(high-low)*(self.width()-6)
-        bins=np.log1p(bins);bins/=max(1,bins.max())
+        low,high=self.bounds()
+        levels,heights=self.histogram_curve()
+        # Keep neighboring knots so the same smoothed path continues across
+        # the viewport edges at every zoom level.
+        start,end=np.searchsorted(levels,[low,high]);visible=slice(max(0,start-2),end+2)
+        xs=3+(levels[visible]-low)/(high-low)*(self.width()-6)
         p.setPen(QPen(QColor(['#dddddd','#ed7777','#77dd88','#7799ee'][self.channel]),1.4))
-        p.drawPolyline(QPolygonF([QPointF(x,self.height()-3-value*(self.height()-6)) for x,value in zip(xs,bins)]))
+        points=[QPointF(x,self.height()-19-value*(self.height()-22)) for x,value in zip(xs,heights[visible])]
+        if points:
+            path=QPainterPath(points[0])
+            for a,b in zip(points,points[1:]):path.quadTo(a,(a+b)*.5)
+            path.lineTo(points[-1]);p.save();p.setClipRect(QRectF(3,2,self.width()-6,self.height()-20));p.drawPath(path);p.restore()
         p.drawText(5,15,f'{low:.6g}');p.drawText(self.width()-95,15,90,20,Qt.AlignRight,f'{high:.6g}')
         if self.panel:
             inputs=np.linspace(low,high,256)
@@ -68,12 +83,15 @@ class HistogramPlot(QWidget):
                 p.drawLine(QPointF(level,self.height()-19),QPointF(x,self.height()-17))
                 p.setBrush(QColor(color));p.drawPolygon(QPolygonF([QPointF(x,self.height()-17),QPointF(x-6,self.height()-3),QPointF(x+6,self.height()-3)]))
     def mousePressEvent(self,event):
-        if self.panel and self.values and event.button()==Qt.LeftButton:
+        if self.panel and self.values and event.button()==Qt.LeftButton and event.position().y()>=self.height()-24:
+            from core.resources import heavy_job_running
+            if heavy_job_running(self.panel.window):return
             self.drag=int(np.argmin([abs(event.position().x()-x) for x in self.handle_positions()]))
             fields=self.panel.fields
             black,white,mid=(fields[key].value() for key in ('black','white','mid'))
             low,high=self.bounds()
             self.drag_origin=(event.position().x(),black,white,black+(white-black)*mid,min(high-low,white-black))
+            self.drag_changed=False
             event.accept()
     def mouseMoveEvent(self,event):
         if self.drag is None:return
@@ -88,16 +106,25 @@ class HistogramPlot(QWidget):
         else:
             center+=delta
         # Update the endpoints and midtone together to keep the centre anchored.
+        if white<=black:return
+        self.drag_changed=self.drag_changed or delta!=0
         for key,value in (('black',black),('white',white),('mid',float(np.clip((center-black)/(white-black),.001,.999)))):
             field=fields[key]
             field.blockSignals(True)
             field.setValue(value)
             field.blockSignals(False)
-        self.panel.save()
+        self.panel.preview_tone()
         self.update()
-    def mouseReleaseEvent(self,event):self.drag=None
+    def mouseReleaseEvent(self,event):
+        changed=self.drag is not None and self.drag_changed
+        self.drag=None
+        if changed:
+            self.panel.save()
+            if self.panel.quick_histogram:self.panel.execute(True,quick_manual=True)
 
 class CurvePlot(QWidget):
+    dragged=Signal()
+    drag_finished=Signal()
     def __init__(self,field):
         super().__init__();self.field=field;self.drag=None;set_em_size(self,'setMinimumSize',10.0,8.75);field.textChanged.connect(self.update)
     def points(self):
@@ -119,13 +146,16 @@ class CurvePlot(QWidget):
         else:
             point=self.normalized(event.position())
             if not .00001<point[0]<.99999 or any(abs(p[0]-point[0])<.00001 for p in points):return
-            points.append(point);points.sort();self.drag=points.index(point);self.store(points)
+            points.append(point);points.sort();self.drag=points.index(point);self.store(points);self.dragged.emit()
     def mouseMoveEvent(self,event):
         if self.drag is None:return
         points=self.points();i=self.drag;point=self.normalized(event.position())
         point[0]=points[i][0] if i in (0,len(points)-1) else float(np.clip(point[0],points[i-1][0]+.00001,points[i+1][0]-.00001))
-        points[i]=point;self.store(points)
-    def mouseReleaseEvent(self,event):self.drag=None
+        points[i]=point;self.store(points);self.dragged.emit()
+    def mouseReleaseEvent(self,event):
+        if self.drag is not None and event.button()==Qt.LeftButton:
+            self.drag=None
+            self.drag_finished.emit()
 
 class BasePanel(QWidget):
     def __init__(self,window,key):
@@ -170,8 +200,87 @@ class BasePanel(QWidget):
         source=self.window.mdi.activeSubWindow();record=self.window.documents.get(source)
         if record is None:QMessageBox.information(self,'Astra',self.tr('Сначала откройте фото.','Open an image first.'))
         return source,record
+    def has_preview(self):
+        dialog=getattr(self,'temporary_preview',None)
+        return dialog is not None and getattr(dialog,'tool_owner',None) is self and dialog.isVisible()
+    def preview_tone(self):
+        source=self.window.mdi.activeSubWindow()
+        inline=self.key=='histogram' and self.quick_histogram
+        if not inline:
+            if not self.has_preview() or self.temporary_preview.source_window is not source:return
+            dialog=self.temporary_preview
+        record=self.window.documents.get(source)
+        if record is None:return
+        data=record['data']
+        history=record['history']
+        input_entry=history.entries[history.index]
+        if self.key=='histogram' and self.quick_histogram:
+            _,baseline=self.quick_stretch_state(record)
+            input_entry=history.entries[baseline]
+        if self.key=='curves' and self.window.guided_action.isChecked():
+            guided=self.window.guided_panel
+            if guided.route[guided.current]['tool']=='native:curves':
+                anchor=guided.step_anchor(guided.current)
+                if anchor is not None and anchor[0]<=history.index:input_entry=anchor[1][0]
+        cache=getattr(self,'tone_cache',None)
+        mask=record.get('mask') if record.get('mask_enabled') else None
+        full_resolution=(self.key=='histogram' and not
+                         self.window.settings.value('preview/low_resolution',False,type=bool))
+        try:
+            if cache is None or cache[0] is not data or cache[1] is not input_entry or cache[5]!=full_resolution:
+                original=data if input_entry is history.entries[history.index] else np.load(input_entry['path'],mmap_mode='r',allow_pickle=False)
+                step=1 if full_resolution else max(1,int(np.ceil(max(original.shape[:2])/384)))
+                sample=original if full_resolution else np.array(original[::step,::step])
+                prepared=None
+                if self.key=='curves':
+                    from .curves_preview import prepare
+                    existing=getattr(self,'curve_preview_cache',None)
+                    if existing is not None and existing[0] is original:
+                        prepared=(sample,sample,existing[2],existing[3],1)
+                    else:prepared=prepare(sample)
+                cache=(data,input_entry,sample,step,prepared,full_resolution)
+                self.tone_cache=cache
+            _,_,sample,step,prepared,_=cache
+            sampled_mask=mask[::step,::step] if mask is not None else None
+            if full_resolution:
+                result=engine.apply_operation(sample,'histogram',self.values(),sampled_mask)
+            elif prepared is None:
+                result=engine.stretch_block(sample,self.values()['channels'])
+                if sampled_mask is not None:
+                    weight=sampled_mask if sample.ndim==2 else sampled_mask[...,None]
+                    with np.errstate(invalid='ignore'):
+                        result=np.where(weight==0,sample,np.where(weight==1,result,sample+(result-sample)*weight))
+            else:
+                from .curves_preview import render
+                result=render(prepared,self.values(),sampled_mask)
+        except (ValueError,OSError,MemoryError):
+            return
+        if inline:
+            self.inline_stretch_source=source
+            display=dict(record,preview_data=result,preview_owner=self,quality_mode=None,
+                         preview_source_size=record['image'].source_size)
+            self.window.render(document=source,display_record=display)
+        else:
+            if self.key=='histogram':dialog.full_resolution=full_resolution
+            dialog.data=result
+            dialog.render(dialog.image.source_size)
+
+    def clear_inline_stretch(self):
+        source=getattr(self,'inline_stretch_source',None)
+        self.inline_stretch_source=None
+        if source is not None and source in self.window.documents:
+            self.window.render(document=source)
+
+    def hideEvent(self,event):
+        self.clear_inline_stretch()
+        self.tone_cache=None
+        super().hideEvent(event)
+
     def clear_preview(self):
-        if getattr(self,'temporary_preview',None) is not None:self.temporary_preview.close()
+        self.clear_inline_stretch()
+        self.tone_cache=None
+        dialog=getattr(self,'temporary_preview',None)
+        if dialog is not None and getattr(dialog,'tool_owner',None) is self:dialog.close()
         for source,record in self.window.documents.items():
             if record.get('preview_owner') is self:
                 record.pop('preview_data',None);record.pop('preview_owner',None)
@@ -185,26 +294,18 @@ class BasePanel(QWidget):
         record=self.window.documents.get(source)
         if record is None or record['data'] is not data:raise ValueError(self.tr('Фото изменилось. Повторите действие.','Image changed. Please retry.'))
         from core.preview_window import show_preview
-        display_range=None;display_stretch=None;stretched=self.key not in ('histogram','mask','curves')
-        from core.preview_levels import checkpoint_transfer
-        fixed_transfer=checkpoint_transfer(record)
-        if self.key in ('curves','signal_booster'):
-            step=max(1,int(np.ceil(max(data.shape[:2])/1600)));sample=data[::step,::step];finite=sample[np.isfinite(sample)]
-            if finite.size:
-                display_range=(min(0.,float(finite.min())),max(1.,float(finite.max())))
-                lo,hi=np.percentile(finite,[.2,99.8]);strength=record.get('strength',20)
-                if record.get('auto_stretch',False) and fixed_transfer is None:
-                    from processes.stretch import automatic_strength
-                    strength=automatic_strength(finite,lo,hi,float(self.window.settings.value('preview_target',.2)))
-                display_stretch=(float(lo),float(hi),strength);stretched=record.get('stretch',False)
-        if self.key not in ('histogram','mask') and fixed_transfer is not None:
-            display_stretch=fixed_transfer
-            stretched=record.get('stretch',False)
-        self.temporary_preview=show_preview(self.window,result,source.windowTitle(),stretched,source=source,display_range=display_range,display_stretch=display_stretch)
+        display_range=(0.,1.) if self.key in ('mask','histogram') else None
+        stretched=False if display_range is not None else None
+        full_resolution=(self.key=='histogram' and not
+                         self.window.settings.value('preview/low_resolution',False,type=bool))
+        self.temporary_preview=show_preview(self.window,result,source.windowTitle(),stretched,source=source,
+                                            display_range=display_range,full_resolution=full_resolution)
+        self.temporary_preview.tool_owner=self
 
 class ProcessingPanel(BasePanel):
     def __init__(self,window,key):
         super().__init__(window,key)
+        self.quick_histogram=False
         if key=='histogram':
             self.channels=self.saved.get('channels',{'All':{'black':0,'white':1,'mid':.5,'curve':'0:0;1:1'}});self.current='All'
             self.channel=QComboBox()
@@ -215,13 +316,16 @@ class ProcessingPanel(BasePanel):
             self.number('mid','Полутона: 0.5 = без изменения','Midtones: 0.5 = identity',.5,.001,.999)
             self.text('curve','Кривая: x:y; x:y (0…1)','Curve: x:y; x:y (0…1)','0:0;1:1')
             self.plot=HistogramPlot();self.layout.addWidget(self.plot);self.channel.currentIndexChanged.connect(lambda:self.switch_channel(self.channel.currentData()))
-            self.plot.setToolTip(self.tr('Колесо: масштаб по горизонтали относительно курсора. Двойной щелчок: полный диапазон. Высота логарифмическая; выборка до 1200 пикселей по стороне.','Wheel: horizontal zoom around cursor. Double click: full range. Logarithmic height; sampled at up to 1200 pixels per side.'))
+            self.plot.setToolTip(self.tr('Колесо: масштаб от ближайшего края. Двойной щелчок: полный диапазон. Нижние маркеры: чёрная точка, полутона и белая точка.','Wheel: zoom from the nearest edge. Double click: full range. Bottom handles: black point, midtones and white point.'))
             self.curveplot=CurvePlot(self.fields['curve']);self.curveplot.setToolTip(self.tr('Клик добавляет узел; перетаскивание меняет кривую; правый клик удаляет узел.','Click adds a point; drag edits the curve; right-click removes a point.'));self.layout.addWidget(self.curveplot)
-            self.button('Обновить гистограмму','Refresh histogram',self.load_histogram)
-            self.button('Чёрная / белая по диапазону фото','Set black / white from image range',lambda:self.load_histogram(True))
+            refresh=self.button('Обновить гистограмму','Refresh histogram',lambda:self.load_histogram())
+            set_range=self.button('Чёрная / белая по диапазону фото','Set black / white from image range',lambda:self.load_histogram(True))
+            self.histogram_full_controls=(self.curveplot,refresh,set_range)
             self.switch_channel('All')
             self.auto_button=self.button('Авторастяжка','Auto stretch',self.toggle_auto);self.auto_button.setCheckable(True)
-            self.auto_target=self.number('auto_target','Фон авторастяжки','Auto stretch background',.25,.05,.5)
+            self.auto_target=self.number('auto_target','Фон авторастяжки','Auto stretch background',DEFAULT_TARGET,.05,.5)
+            self.auto_target.setToolTip(self.tr('Целевая яркость фона. Astra может снизить её, чтобы сохранить детали в светах.',
+                                               'Target background brightness. Astra may lower it to preserve highlight detail.'))
             self.plot.panel=self;set_em_size(self.plot,'setMinimumHeight',9.6875)
             self.auto_before=None
             self.layout.removeWidget(self.plot);self.layout.insertWidget(0,self.plot)
@@ -249,7 +353,7 @@ class ProcessingPanel(BasePanel):
             self.sample_list=QListWidget();set_em_size(self.sample_list,'setMaximumHeight',6.875);self.layout.addWidget(self.sample_list)
             self.button('Удалить выбранную рамку','Remove selected rectangle',self.remove_sample)
             self.button('Очистить рамки','Clear rectangles',self.clear_sample_selection)
-            self.note('Добавьте до 20 рамок вокруг отдельных горячих и холодных дефектов. Подбор и исправление всего кадра начнутся по кнопке Применить; Предпросмотр позволяет проверить результат заранее. Размер рамки до 64×64 пикселей. Не выбирайте звёзды.','Add up to 20 tight rectangles around individual hot and cold defects. Apply fits the samples and corrects the whole image; Preview checks the result beforehand. Each rectangle is limited to 64×64 pixels. Do not select stars.')
+            self.note('Добавьте до 20 рамок вокруг отдельных горячих и холодных дефектов. Подбор и исправление всего кадра начнутся по кнопке Применить. Размер рамки до 64×64 пикселей. Не выбирайте звёзды.','Add up to 20 tight rectangles around individual hot and cold defects. Apply fits the samples and corrects the whole image. Each rectangle is limited to 64×64 pixels. Do not select stars.')
             self.correction_status=self.note('','')
         else:
             self.check('neutral','Нейтрализация выбранного фона','Neutralize selected background',True)
@@ -266,21 +370,24 @@ class ProcessingPanel(BasePanel):
         actions.setObjectName('toolActions');self.layout.addWidget(actions)
         self.preview_timer=QTimer(self);self.preview_timer.setSingleShot(True);self.preview_timer.setInterval(350);self.preview_timer.timeout.connect(self.live_preview)
     def save(self,*args):
+        if self.quick_histogram:
+            if not self.guard:self.values();self.plot.update()
+            return
         super().save(*args)
         if not self.guard and hasattr(self,'plot'):
             self.plot.update()
             if hasattr(self,'auto_button'):self.auto_button.setChecked(False)
-        if not self.guard and hasattr(self,'preview_timer') and getattr(self,'temporary_preview',None) is not None and self.temporary_preview.isVisible():self.preview_timer.start()
+        if not self.guard and hasattr(self,'preview_timer') and self.has_preview():self.preview_timer.start()
     def live_preview(self):
         from core.resources import heavy_job_running
-        if heavy_job_running(self.window):self.preview_timer.start();return
-        if getattr(self,'temporary_preview',None) is not None and self.temporary_preview.isVisible():self.execute(False)
+        if heavy_job_running(self.window) or getattr(getattr(self,'plot',None),'drag',None) is not None:self.preview_timer.start();return
+        if self.has_preview():self.execute(False)
     def values(self):
         if self.key=='defects':return {**super().values(),'algorithm_version':2,'sample_halo_fraction':self.saved.get('sample_halo_fraction',.03)}
         if self.key=='histogram' and hasattr(self,'channels'):
             values=super().values();values.pop('auto_target',None)
             if len(values)==4:self.channels[self.current]=values
-            return {'channels':self.channels,'auto_target':self.fields['auto_target'].value() if 'auto_target' in self.fields else .25}
+            return {'channels':self.channels,'auto_target':self.fields['auto_target'].value() if 'auto_target' in self.fields else DEFAULT_TARGET}
         return super().values()
     def switch_channel(self,key):
         self.guard=True;self.current=key
@@ -291,7 +398,27 @@ class ProcessingPanel(BasePanel):
         self.guard=False;self.plot.channel=self.channel.currentIndex();self.plot.update()
         for name,ru,en in [('black','Чёрная точка','Black point'),('white','Белая точка','White point')]:
             caption=self.form.labelForField(self.fields[name]);caption.setText(self.tr(ru,en)+(' (0…1)' if key!='All' else self.tr(' (данные)',' (data units)')))
+    def set_tool_mode(self,mode):
+        if self.key!='histogram':return
+        from core.tool_modes import ToolMode
+        quick=mode==ToolMode.QUICK
+        if self.quick_histogram==quick:return
+        self.clear_inline_stretch()
+        if quick:
+            self.standard_channels=self.values()['channels']
+            self.channels={}
+        else:self.channels=self.standard_channels
+        self.quick_histogram=quick
+        for field in self.fields.values():self.form.setRowVisible(field,not quick)
+        for widget in self.histogram_full_controls:widget.setVisible(not quick)
+        self.auto_button.setChecked(False);self.auto_button.setCheckable(not quick)
+        self.switch_channel(self.channel.currentData())
+        self.plot.drag=None;self.plot.values=None;self.plot.views.clear();self.plot.update()
+        self.histogram_generation+=1;self.histogram_timer.start(0)
+
     def toggle_auto(self):
+        if self.quick_histogram:
+            self.execute(True,quick_auto=True);return
         if not self.auto_button.isChecked():
             if self.auto_before is not None:self.channels=self.auto_before;self.switch_channel(self.current);self.save()
             self.execute(False);return
@@ -300,8 +427,7 @@ class ProcessingPanel(BasePanel):
         self.values();before=json.loads(json.dumps(self.channels));data=record['data'];target=self.auto_target.value()
         def done(settings):
             self.auto_before=before;self.channels=settings['channels'];self.switch_channel('All');self.channel.setCurrentIndex(0);self.save();self.auto_button.setChecked(True);QTimer.singleShot(25,self,lambda:self.execute(False))
-        from .autostretch import auto_settings
-        if not launch(self.window,self.tr('Авторастяжка','Auto stretch'),lambda job:auto_settings(data,target),done,128*1024**2):self.auto_button.setChecked(False)
+        if not launch(self.window,self.tr('Авторастяжка','Auto stretch'),lambda job:auto_settings(data,target),done,128*1024**2,quiet=True):self.auto_button.setChecked(False)
 
     def stop_histogram(self):
         self.histogram_active=False
@@ -309,8 +435,15 @@ class ProcessingPanel(BasePanel):
         self.histogram_timer.stop()
         self.histogram_source=None
 
+    def showEvent(self,event):
+        super().showEvent(event)
+        if getattr(self,'histogram_active',False):self.histogram_timer.start(0)
+
     def sync_histogram(self):
-        if not isValid(self) or not isValid(self.window) or not self.histogram_active:return
+        if not isValid(self) or not isValid(self.window) or not self.histogram_active or not self.isVisible():return
+        preview_source=getattr(self,'inline_stretch_source',None)
+        if preview_source is not None and preview_source is not self.window.mdi.activeSubWindow():
+            self.clear_inline_stretch()
         if getattr(self.window,'project_io',False) or getattr(self.window,'_restoring_project',False):
             self.histogram_timer.start(200)
             return
@@ -319,7 +452,8 @@ class ProcessingPanel(BasePanel):
         if record is None or (self.plot.values and self.histogram_source and self.histogram_source() is record['data']):return
         self.plot.values=None
         self.plot.update()
-        if heavy_job_running(self.window):
+        queue=getattr(self.window,'task_queue',None)
+        if heavy_job_running(self.window) or (queue is not None and (queue.pending or queue.dispatching)):
             self.histogram_timer.start(200)
         else:self.load_histogram()
 
@@ -328,27 +462,37 @@ class ProcessingPanel(BasePanel):
         if getattr(self.window,'project_io',False) or getattr(self.window,'_restoring_project',False):return
         source,record=self.target()
         if record is None:return
-        data=record['data'];master=json.loads(json.dumps(self.values().get('channels',{}).get('All',{})))
+        data=record['data'];quick=self.quick_histogram
+        history=record['history'];entry=history.entries[history.index]
+        quick_state,baseline=self.quick_stretch_state(record) if quick else (None,history.index)
+        channels=json.loads(json.dumps(quick_state['channels'])) if quick_state else {}
+        master=(channels if quick else self.values()['channels']).get('All',{}).copy()
+        baseline_entry=history.entries[baseline]
         generation=self.histogram_generation+1
         def work(job):
-            value=engine.histogram(data)
-            step=max(1,int(np.ceil(max(data.shape[:2])/1200)));raw=data[::step,::step];value['samples']=[raw[np.isfinite(raw)].ravel()]
-            if data.ndim==3:
-                step=max(1,int(np.ceil(max(data.shape[:2])/1200)));sample=engine.transfer(data[::step,::step].astype(float),master)
+            original=data if entry is baseline_entry else np.load(baseline_entry['path'],mmap_mode='r',allow_pickle=False)
+            value=engine.histogram(original)
+            if original.ndim==3:
+                step=max(1,int(np.ceil(max(original.shape[:2])/1200)));raw=original[::step,::step]
+                sample=engine.transfer(raw.astype(float),master)
                 for i in range(3):
-                    channel=sample[...,i];value['bins'][i+1]=np.histogram(channel[np.isfinite(channel)],256,range=(0,1))[0].tolist()
-                    value['samples'].append(channel[np.isfinite(channel)].ravel())
+                    channel=sample[...,i];valid=channel[np.isfinite(channel)].ravel()
+                    value['bins'][i+1]=np.histogram(valid,256,range=(0,1))[0].tolist()
             return value
         def done(value):
             if not isValid(self) or not isValid(self.plot) or not isValid(self.window):return
             if not self.histogram_active or self.histogram_generation!=generation:return
             active=self.window.documents.get(self.window.mdi.activeSubWindow())
             if active is None or active['data'] is not data:return
-            self.plot.values=value;self.plot.views.clear();self.plot.update()
+            if quick:
+                self.channels=channels;self.switch_channel(self.channel.currentData());self.plot.drag=None
+            self.plot.values=value
+            if not quick or getattr(self,'histogram_input',None) is not baseline_entry:self.plot.views.clear()
+            self.histogram_input=baseline_entry;self.plot.update()
             if set_range:
                 self.channel.setCurrentIndex(0);self.fields['black'].setValue(value['low']);self.fields['white'].setValue(value['high'] if value['high']>value['low'] else value['low']+1)
         import weakref
-        if launch(self.window,self.tr('Гистограмма','Histogram'),work,done,64*1024**2):
+        if launch(self.window,self.tr('Гистограмма','Histogram'),work,done,64*1024**2,quiet=True):
             self.histogram_generation=generation
             self.histogram_source=weakref.ref(data)
     def select_region(self):
@@ -417,15 +561,41 @@ class ProcessingPanel(BasePanel):
         if source is not getattr(self,'roi_source',None) or rect is None:QMessageBox.information(self,'Astra',self.tr('Сначала выделите область на этом фото.','Select a region on this image first.'));return
         for key,value in zip(('x','y','width','height'),rect.getRect()):self.fields[key].setValue(value)
         record['image'].crop_enabled=False;record['image'].update()
-    def execute(self,apply):
+    @staticmethod
+    def quick_stretch_state(record):
+        history=record['history'];state=record.get('quick_stretch')
+        if state and history.entries[history.index] is state['result']:
+            for index,entry in enumerate(history.entries[:history.index]):
+                if entry is state['input']:return state,index
+        return None,history.index
+
+    def execute(self,apply,*,quick_auto=False,quick_manual=False):
         source,record=self.target()
         if record is None:return
-        data=record['data'];settings=json.loads(json.dumps(self.values()));mask=record.get('mask') if record.get('mask_enabled') else None;report={}
+        data=record['data'];settings={} if quick_auto else json.loads(json.dumps(self.values()));mask=record.get('mask') if record.get('mask_enabled') else None;report={}
+        quick=quick_auto or quick_manual
+        if quick:
+            from core.resources import heavy_job_running
+            if heavy_job_running(self.window):
+                if quick_manual:self.clear_inline_stretch()
+                return
+            guided=self.window.guided_panel;history=record['history'];entry=history.entries[history.index]
+            state,baseline=self.quick_stretch_state(record)
+            if quick_auto:
+                if state and state['automatic']:return
+                anchor=guided.step_anchor(guided.current)
+                if state is None and anchor is not None and anchor[0]<=history.index:baseline=anchor[0]
+            baseline_entry=history.entries[baseline]
         samples=list(self.sample_rectangles) if self.key=='defects' and source is getattr(self,'roi_source',None) and data is getattr(self,'sample_data',None) else []
         if samples:
             self.sample_selecting=False;self.sample_view.crop_enabled=False;self.sample_view.update()
         def done(result):
             if source not in self.window.documents or self.window.documents[source]['data'] is not data:raise ValueError(localize('Фото изменилось.'))
+            if quick:
+                if not self.quick_histogram or self.window.mdi.activeSubWindow() is not source:return
+                self.inline_stretch_source=None
+                self.window.history_go(source,baseline)
+                if history.index!=baseline:return
             if self.key=='defects':
                 self.correction_status.setText(report.get('message',''))
                 if apply:self.clear_samples()
@@ -435,8 +605,15 @@ class ProcessingPanel(BasePanel):
                     record['stretch']=False
                     if source is self.window.mdi.activeSubWindow():self.window.set_preview_stretch(False)
                 self.window.apply_image_result(source,result,{'histogram':'HT','color':'CC','defects':'CPC'}[self.key])
+                if quick:record['quick_stretch']=dict(result=history.entries[history.index],input=baseline_entry,
+                                                      channels=report['channels'],automatic=quick_auto)
             else:self.preview_result(source,data,result)
         def work(job):
+            if quick:
+                original=data if baseline_entry is entry else np.load(baseline_entry['path'],mmap_mode='r',allow_pickle=False)
+                options=auto_settings(original) if quick_auto else settings
+                report['channels']=options['channels']
+                return engine.apply_operation(original,'histogram',options,mask,job.isInterruptionRequested,job.progress.emit)
             if samples:
                 if settings.get('sample_auto',True):
                     from .defect_templates import correct_from_samples
@@ -463,7 +640,13 @@ class ProcessingPanel(BasePanel):
                 if hot+cold==0:message+=self.tr('. Ничего не обнаружено. Уменьшите порог или увеличьте размер дефекта; проверьте активную маску.','. Nothing detected. Lower the threshold or increase the defect radius; check the active mask.')
                 report['message']=message;job.note.emit(message)
             return result
-        launch(self.window,self.tr('Обработка','Processing'),work,done,engine.operation_memory(data,self.key),details=settings)
+        title=self.tr('Авторастяжка','Auto stretch') if quick_auto else self.tr('Обработка','Processing')
+        estimated=engine.operation_memory(data,self.key)
+        if quick_auto:estimated+=128*1024**2
+        started=launch(self.window,title,work,done,estimated,quiet=self.key=='histogram',details=settings or None)
+        if quick_manual:
+            if started:self.window.native_job.finished.connect(self.clear_inline_stretch)
+            else:self.clear_inline_stretch()
     def reset(self):
         self.cancel()
         if self.key=='histogram':self.channels={};self.switch_channel(self.current);self.save()

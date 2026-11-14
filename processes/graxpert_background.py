@@ -1,5 +1,4 @@
 """UI for official GraXpert AI and point-driven RBF CLI methods."""
-import numpy as np
 from PySide6.QtCore import Qt,QProcess
 from PySide6.QtWidgets import QLabel,QPushButton,QMessageBox
 from .native.ui import BasePanel
@@ -15,7 +14,7 @@ class PointBinding:
         if record is None:return
         self.image.background_points=record.get('graxpert_points',[])
         self.image.background_sample_radius=self.panel.options.fields['sample_size'].value();self.image.update()
-        self.panel.counter.setText(self.panel.tr(f'Точек: {len(self.image.background_points)}. ЛКМ - добавить, ПКМ - удалить ближайшую, средняя кнопка - перемещение.',f'Points: {len(self.image.background_points)}. Left-click adds; right-click removes nearest; middle button pans.'))
+        self.panel.counter.setText(self.panel.tr(f'Точек: {len(self.image.background_points)}. ЛКМ - добавить, ПКМ по квадрату - удалить, средняя кнопка - перемещение.',f'Points: {len(self.image.background_points)}. Left-click adds; right-click a square to remove it; middle button pans.'))
     def click(self,point,button):
         from core.resources import heavy_job_running
         if heavy_job_running(self.owner):return
@@ -23,10 +22,14 @@ class PointBinding:
         if record is None or record['data'] is not self.original:return
         points=record['graxpert_points'];radius=self.panel.options.fields['sample_size'].value();x,y=round(point.x()),round(point.y())
         if button==Qt.RightButton:
-            if points:
-                distances=[np.hypot(px-x,py-y) for px,py in points];i=int(np.argmin(distances))
-                if distances[i]<=max(radius,12/self.image.scale):points.pop(i)
-        elif radius<=x<self.original.shape[1]-radius and radius<=y<self.original.shape[0]-radius:
+            # Hit-test the drawn square, including its corners. Clicking empty
+            # space must never remove a nearby sample at a low zoom level.
+            hits=[i for i,(px,py) in enumerate(points)
+                  if abs(px-point.x())<=radius and abs(py-point.y())<=radius]
+            if hits:
+                i=min(hits,key=lambda i:(points[i][0]-point.x())**2+(points[i][1]-point.y())**2)
+                points.pop(i)
+        elif button==Qt.LeftButton and radius<=x<self.original.shape[1]-radius and radius<=y<self.original.shape[0]-radius:
             if len(points)<500 and [x,y] not in points:points.append([x,y])
         self.update_points()
     def clear_points(self):
@@ -40,21 +43,19 @@ class GraXpertBackgroundPanel(BasePanel):
     def __init__(self,window):
         super().__init__(window,'graxpert_background');self.editor=None;self.active=False
         self.options=OptionForm(window,'graxpert:background-extraction');self.layout.addWidget(self.options)
-        self.points_button=self.button('Расставить точки на фото','Place points on image',self.edit_points);self.points_button.setCheckable(True)
         self.counter=self.note('Точки ставятся на основном фото: ЛКМ - добавить, ПКМ - удалить, средняя кнопка - перемещение.','Place points on the main image: left-click adds, right-click removes, middle button pans.')
-        self.button('Очистить точки','Clear points',self.clear_points)
-        self.note('RBF выполняется установленным GraXpert на CPU. Выберите минимум 6 участков чистого фона по всему кадру, избегая звёзд и туманностей. GraXpert обрезает результат в диапазон 0…1.','RBF runs in installed GraXpert on CPU. Choose at least 6 clean background samples spread across the frame, avoiding stars and nebulae. GraXpert clips the result to 0…1.')
+        self.rbf_note=self.note('RBF выполняется установленным GraXpert на CPU. Выберите минимум 6 участков чистого фона по всему кадру, избегая звёзд и туманностей. GraXpert обрезает результат в диапазон 0…1.','RBF runs in installed GraXpert on CPU. Choose at least 6 clean background samples spread across the frame, avoiding stars and nebulae. GraXpert clips the result to 0…1.')
         self.button('Предпросмотр','Preview',lambda:self.execute(True));self.button('По умолчанию','Defaults',self.options.reset);self.button('Отмена','Cancel',self.cancel);self.button('Применить','Apply',lambda:self.execute(False))
         self.options.changed.connect(self.changed);self.changed()
     def changed(self):
-        rbf=self.options.fields['method'].currentData()=='RBF';self.points_button.setEnabled(rbf)
-        if not rbf:self.points_button.setChecked(False)
-        self.sync(self.active)
-    def edit_points(self):
         self.sync(self.active)
     def sync(self,active):
+        guided=bool(self.window.tool_panel.property('guidedEmbedded'))
+        self.options.set_guided_mode(guided)
+        show_points=self.options.fields['method'].currentData()=='RBF'
+        for control in (self.counter,self.rbf_note):control.setVisible(show_points)
         self.active=active;source=self.window.mdi.activeSubWindow();record=self.window.documents.get(source)
-        enabled=active and self.points_button.isChecked() and self.options.fields['method'].currentData()=='RBF' and record is not None
+        enabled=active and self.options.fields['method'].currentData()=='RBF' and record is not None
         if self.editor is not None and (not enabled or self.editor.source is not source or self.editor.original is not record['data']):
             self.editor.detach();self.editor=None
         if enabled:
@@ -71,6 +72,8 @@ class GraXpertBackgroundPanel(BasePanel):
         if record is None:return
         try:
             options=self.options.values()
+            if self.options.guided_mode and options['method']=='AI':
+                options.update(correction='Subtraction',background=False)
             if options['method']=='RBF':
                 from .graxpert import rbf_preferences
                 if record.get('graxpert_points_shape')!=list(record['data'].shape[:2]):raise ValueError(self.tr('Сначала задайте точки фона.','Set background points first.'))
@@ -78,7 +81,7 @@ class GraXpertBackgroundPanel(BasePanel):
             self.window.run_external('graxpert','background-extraction',options,preview=preview)
         except ValueError as error:QMessageBox.warning(self,'GraXpert',str(error))
     def clear_preview(self):
-        self.points_button.setChecked(False);self.sync(False)
+        self.sync(False)
         super().clear_preview()
     def cancel(self):
         process=getattr(self.window,'external_process',None)

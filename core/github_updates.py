@@ -1,4 +1,5 @@
 """Asynchronous GitHub release checks for the public Astra build."""
+from core.i18n import localize
 import json
 import re
 
@@ -54,7 +55,7 @@ def check_for_updates(window, manual=False):
             data = json.loads(bytes(reply.readAll()))
             version = str(data.get('tag_name', '')).lstrip('v')
             if not version_tuple(version):
-                raise ValueError('Invalid release version')
+                raise ValueError(localize('Некорректная версия выпуска'))
             if version_tuple(version) <= version_tuple(VERSION):
                 if manual: QMessageBox.information(window, 'Astra', window.trtext('Установлена последняя версия.', 'The latest version is installed.'))
                 return

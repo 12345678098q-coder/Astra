@@ -1,6 +1,7 @@
 from core.i18n import localize
 import json
 import numpy as np
+from core.image_selector import ImageSelector
 from PySide6.QtWidgets import *
 from PySide6.QtGui import QPainter,QColor,QPen,QPolygonF
 from PySide6.QtCore import QPointF,Qt,QTimer
@@ -13,6 +14,9 @@ TITLES={'edges':('Коррекция краёв','Edge correction'),'scnr':('SCN
 DEFAULTS={'scnr':dict(channel=1,protection='average',amount=1,lightness=True),'lhe':dict(size=64,limit=2,amount=.5,auto=False),'hdr':dict(scale=8,layers=4,amount=.5),'curves':dict(curves={}) ,'linearfit':dict(low=0,high=1)}
 
 CURVE_COLORS={'All':'#eeeeee','R':'#f07878','G':'#79d58c','B':'#80aaff','L':'#ffd580','S':'#df8bf0'}
+from .narrowband import DEFAULTS as NARROWBAND_DEFAULTS
+TITLES['narrowband']=('Нормализация узкополосного RGB','Narrowband RGB normalization')
+DEFAULTS['narrowband']=NARROWBAND_DEFAULTS
 
 class SmoothCurve(CurvePlot):
  def __init__(self,field):super().__init__(field);self.bins=None;self.color=CURVE_COLORS['All']
@@ -29,6 +33,27 @@ class SmoothCurve(CurvePlot):
 class AdvancedPanel(BasePanel):
  def __init__(self,window,key):
   super().__init__(window,key);self.defaults=DEFAULTS[key]
+  if key=='narrowband':
+   self.combo('palette',self.tr('Исходная палитра','Input palette'),[
+    ('SHO · R=SII, G=Hα, B=OIII','SHO'),('HOO · R=Hα, G/B=OIII','HOO')])
+   for name,ru,en,low,high in [
+    ('normalization','Выравнивание каналов','Channel normalization',0,1),
+    ('ha_blend','Примесь красного в зелёный','Red contribution to green',0,1),
+    ('s2_boost','Усиление SII','SII boost',0,4),
+    ('o3_boost','Усиление OIII','OIII boost',0,4),
+    ('brightness','Яркость','Brightness',.1,3),
+    ('shadow','Чёрная точка','Shadow point',0,.25),
+    ('scnr','Подавление избытка зелёного','Green excess suppression',0,1),
+    ('highlights','Защита светов','Highlight protection',0,1),
+    ('amount','Сила применения','Amount',0,1)]:
+    field=self.number(name,ru,en,self.defaults[name],low,high)
+    field.setDecimals(3);field.setSingleStep(.05 if high<=1 else .1)
+   self.check('lightness','Сохранять яркость при балансировке','Preserve luminance while balancing',True)
+   self.check('stars','Защищать звёзды','Protect stars',True)
+   def palette_changed():
+    self.fields['s2_boost'].setEnabled(self.fields['palette'].currentData()=='SHO')
+   self.fields['palette'].currentIndexChanged.connect(palette_changed);palette_changed()
+   self.note('Для узкополосного RGB в диапазоне 0…1. Выберите фактическую палитру: SHO или HOO. Усиливается сигнал над фоном, до 4×; в HOO сигнал G/B объединяется как OIII. Градиент и цветовой перекос фона следует убрать заранее. Предрастяжка меняет только просмотр.','For narrowband RGB in 0…1. Select the actual SHO or HOO palette. Signal above the background is boosted up to 4×; HOO combines G/B signal as OIII. Correct gradients and background color casts first. Preview stretch affects display only.')
   if key=='scnr':
    self.combo('channel',localize('Канал'),[('R',0),('G',1),('B',2)])
    self.combo('protection',self.tr('Способ подавления оттенка','Tint suppression method'),[(self.tr(r,e),v) for r,e,v in [('По среднему двух других каналов','Other channels: average','average'),('Мягко: по большему каналу','Gentle: larger channel','maximum'),('Сильнее: по меньшему каналу','Stronger: smaller channel','minimum'),('Плавно: по большему каналу','Smooth: larger-channel mask','maxmask'),('Плавно: по сумме каналов','Smooth: summed-channel mask','addmask')]])
@@ -44,26 +69,30 @@ class AdvancedPanel(BasePanel):
     self.channel.addItem(label,code);self.channel.setItemData(self.channel.count()-1,QColor(CURVE_COLORS[code]),Qt.ForegroundRole)
    self.form.addRow(self.tr('Кривая','Curve'),self.channel)
    self.text('points','Узлы x:y; x:y','Points x:y; x:y','0:0;1:1');self.plot=SmoothCurve(self.fields['points']);self.layout.addWidget(self.plot);self.channel.currentIndexChanged.connect(lambda:self.switch(self.channel.currentData()))
+   self.plot.dragged.connect(self.preview_tone)
+   self.plot.drag_finished.connect(self.save)
    self.button('Сброс выбранной кривой','Reset selected curve',lambda:self.fields['points'].setText('0:0;1:1'));self.switch('All')
   if key=='linearfit':
-   self.target_box=QComboBox();self.reference=QComboBox();self.form.addRow(self.tr('Обрабатываемое','Target'),self.target_box);self.form.addRow(self.tr('Опорное','Reference'),self.reference);self.button('Обновить список изображений','Refresh images',self.refresh)
+   self.target_box=ImageSelector(self.refresh);self.reference=ImageSelector(self.refresh);self.form.addRow(self.tr('Обрабатываемое','Target'),self.target_box);self.form.addRow(self.tr('Опорное','Reference'),self.reference);self.button('Обновить список изображений','Refresh images',self.refresh)
    self.number('low','Нижний порог','Lower bound',0,-1e30,1e30);self.number('high','Верхний порог','Upper bound',1,-1e30,1e30);self.refresh()
   self.status=self.note('','')
   if key=='lhe':
    self.fields['auto'].toggled.connect(self.lhe_dependencies);self.lhe_dependencies()
    self.note('Авто подбирает размер области, ограничение и силу по локальной структуре и шуму. На шумном или однородном фоне эффект ослабляется вплоть до нуля.','Auto selects region size, contrast limit and amount from local structure and noise. Noisy or uniform backgrounds receive a weaker effect, down to zero.')
   if key=='scnr':self.note('SCNR подавляет оттенок и не заменяет цветокалибровку.','SCNR suppresses tint and does not replace color calibration.')
-  elif key not in ('curves','sequence'):self.note('Кроме LinearFit, требуется диапазон данных 0…1. Изменения LHE и HDR делают линейные данные нелинейными.','Except LinearFit, data must be in 0…1. LHE and HDR make linear data nonlinear.')
+  elif key not in ('curves','sequence','narrowband'):self.note('Кроме LinearFit, требуется диапазон данных 0…1. Изменения LHE и HDR делают линейные данные нелинейными.','Except LinearFit, data must be in 0…1. LHE and HDR make linear data nonlinear.')
   for ru,en,fn in [('Предпросмотр','Preview',lambda:self.execute(False)),('Сброс','Reset',self.reset),('Отмена','Cancel',self.cancel),('Применить','Apply',lambda:self.execute(True))]:self.button(ru,en,fn)
   if key=='curves':
    self.preview_timer=QTimer(self);self.preview_timer.setSingleShot(True);self.preview_timer.setInterval(60);self.preview_timer.timeout.connect(self.live_preview)
  def save(self,*args):
+  if self.key=='curves' and getattr(getattr(self,'plot',None),'drag',None) is not None:return
   super().save(*args)
-  if not self.guard and hasattr(self,'preview_timer') and not self.preview_timer.isActive() and getattr(self,'temporary_preview',None) is not None and self.temporary_preview.isVisible():self.preview_timer.start()
+  if not self.guard and hasattr(self,'preview_timer') and not self.preview_timer.isActive() and self.has_preview():self.preview_timer.start()
  def live_preview(self):
+  if not self.has_preview():return
   from core.resources import heavy_job_running
-  if heavy_job_running(self.window):self.preview_timer.start();return
-  if getattr(self,'temporary_preview',None) is not None and self.temporary_preview.isVisible():self.execute(False)
+  if heavy_job_running(self.window) or self.plot.drag is not None:self.preview_timer.start();return
+  self.execute(False)
  def combo(self,key,title,items):
   box=QComboBox()
   for text,value in items:box.addItem(text,value)
@@ -83,7 +112,7 @@ class AdvancedPanel(BasePanel):
   self.current=key
   self.guard=True;self.fields['points'].setText(self.curves.get(key,'0:0;1:1'));self.guard=False
   self.plot.color=CURVE_COLORS[key];self.plot.bins=None
-  source=self.window.mdi.activeSubWindow();record=self.window.documents.get(source)
+  record=self.curve_record()
   if record:
    a=record['data'];step=max(1,int(np.ceil(max(a.shape[:2])/1000)));a=a[::step,::step]
    finite=a[np.isfinite(a)]
@@ -97,10 +126,15 @@ class AdvancedPanel(BasePanel):
      a=rgb2hsv(np.nan_to_num(a))[...,1]
    self.plot.bins=np.histogram(a[np.isfinite(a)],256,range=(0,1))[0];self.plot.update()
   self.plot.update();self.save()
+ def curve_record(self):
+  return self.window.documents.get(self.window.mdi.activeSubWindow())
  def refresh(self):
+  selected=self.target_box.currentData() or self.window.mdi.activeSubWindow()
+  reference=self.reference.currentData()
   self.target_box.clear();self.reference.clear()
   for source in self.window.documents:self.target_box.addItem(source.windowTitle(),source);self.reference.addItem(source.windowTitle(),source)
-  self.target_box.setCurrentIndex(max(0,self.target_box.findData(self.window.mdi.activeSubWindow())))
+  self.target_box.setCurrentIndex(max(0,self.target_box.findData(selected)))
+  self.reference.setCurrentIndex(max(0,self.reference.findData(reference)))
  def reset(self):
   self.cancel()
   if self.key=='curves':self.curves={};self.fields['points'].setText('0:0;1:1');self.switch(self.current)

@@ -10,7 +10,7 @@ from .tooltips import HELP
 class OptionForm(QWidget):
     changed=Signal()
     def __init__(self,window,key):
-        super().__init__(); self.window=window; self.key=key; self.fields={}
+        super().__init__(); self.window=window; self.key=key; self.fields={};self.guided_mode=False
         try:saved=values_for(key,json.loads(window.settings.value('process_options/'+key,'{}')))
         except (ValueError,TypeError):saved=values_for(key)
         layout=QFormLayout(self);layout.setContentsMargins(0,0,0,0);layout.setRowWrapPolicy(QFormLayout.WrapLongRows);layout.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
@@ -49,13 +49,16 @@ class OptionForm(QWidget):
         values={}
         for key,field in self.fields.items():
             values[key]=field.isChecked() if isinstance(field,QCheckBox) else field.currentData() if isinstance(field,QComboBox) else field.text().strip() if isinstance(field,QLineEdit) else field.value()
+        if 'gpu' in values:
+            from core.gpu_runtime import is_installed
+            if not is_installed():values['gpu']=False
         return values_for(self.key,values)
     def dependencies(self):
         f=self.fields
         if self.key=='graxpert:background-extraction':
             rbf=f['method'].currentData()=='RBF'
-            for key in ('sample_size','kernel'):self.layout().setRowVisible(f[key],rbf)
-            for key in ('model','gpu'):self.layout().setRowVisible(f[key],not rbf)
+            visible=set(f)-({'model','gpu'} if rbf else {'sample_size','kernel'})
+            for key,field in f.items():self.layout().setRowVisible(field,key in visible)
         if self.key=='rcastro:bxt':
             automatic=f['auto_settings'].isChecked()
             f['auto_settings'].setToolTip(self.window.trtext('Astra анализирует звёзды и шум, подбирает силу и способ оценки PSF. Это эвристический подбор, а не гарантия оптимального результата. Для линейных кадров со звёздами.','Astra analyzes stars and noise and selects strengths and PSF mode. Heuristic selection, not a guarantee of optimal results. For linear images containing stars.'))
@@ -66,6 +69,25 @@ class OptionForm(QWidget):
         if 'unscreen' in f:f['unscreen'].setEnabled(f['stars'].isChecked())
         if self.key=='starnet':
             for key in ('shadows','target'):f[key].setEnabled(f['mode'].currentData()==0)
+        if 'gpu' in f:
+            from core.gpu_runtime import is_installed
+            rbf=self.key=='graxpert:background-extraction' and f['method'].currentData()=='RBF'
+            self.layout().setRowVisible(f['gpu'],is_installed() and not rbf)
+        if self.guided_mode:
+            from core.tool_modes import profile_for,ToolMode
+            context={key:field.currentData() for key,field in f.items() if isinstance(field,QComboBox)}
+            allowed=profile_for(self.key).visible_fields(ToolMode.QUICK,f,context)
+            for key,field in f.items():
+                if key not in allowed:self.layout().setRowVisible(field,False)
+    def set_tool_mode(self,mode):
+        from core.tool_modes import ToolMode
+        self.guided_mode=mode==ToolMode.QUICK
+        from .quick_deconvolution import KEYS
+        if self.key in KEYS:self.setVisible(not self.guided_mode)
+        for field in self.fields.values():self.layout().setRowVisible(field,True)
+        self.dependencies()
+    def set_guided_mode(self,enabled):
+        self.guided_mode=enabled;self.dependencies()
     def updated(self,*args):
         self.dependencies()
         try:values=self.values()

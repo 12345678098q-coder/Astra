@@ -1,6 +1,6 @@
 from core.responsive import fit_screen
 from core.i18n import localize
-from PySide6.QtCore import Qt,QTimer
+from PySide6.QtCore import QPoint,Qt,QTimer
 from PySide6.QtWidgets import QDialog,QVBoxLayout,QHBoxLayout,QLabel,QProgressBar,QPlainTextEdit,QToolButton
 
 class LogOverlay(QDialog):
@@ -25,8 +25,9 @@ class LogOverlay(QDialog):
     def place(self):
         if not self.owner.isVisible() or self.owner.isMinimized():
             self.hide(); return
-        rect=self.owner.statusBar().geometry(); point=self.owner.statusBar().mapToGlobal(rect.topLeft()-rect.topLeft())
-        self.move(point.x()+self.owner.statusBar().width()-self.width()-8,point.y()-self.height()-8)
+        workspace=self.owner.mdi.viewport()
+        bottom_right=workspace.mapToGlobal(QPoint(workspace.width(),workspace.height()))
+        self.move(bottom_right.x()-self.width()-8,bottom_right.y()-self.height()-8)
     def display(self):
         self.place(); self.show(); self.raise_(); self.timer.start()
     def toggle(self):

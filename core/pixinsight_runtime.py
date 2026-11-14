@@ -1,4 +1,5 @@
 """Small, explicit PJSR UI subset. Runs in its own disposable process."""
+from core.i18n import configure_interface, localize
 from pathlib import Path
 import re
 import sys
@@ -12,9 +13,9 @@ from PySide6.QtQml import QJSEngine
 def preprocess(path, root, seen=None):
     path = Path(path).resolve(); root = Path(root).resolve()
     if not path.is_relative_to(root):
-        raise ValueError('Include outside the imported package: '+str(path))
+        raise ValueError(localize('Подключаемый файл вне импортированного пакета: ', 'Include outside the imported package: ') + str(path))
     seen = set() if seen is None else seen
-    if path in seen: raise ValueError('Recursive include: '+str(path))
+    if path in seen: raise ValueError(localize('Рекурсивное подключение файла: ', 'Recursive include: ') + str(path))
     seen.add(path)
     result = []
     for line in path.read_text(encoding='utf-8-sig').splitlines():
@@ -29,7 +30,7 @@ def preprocess(path, root, seen=None):
             if name.startswith('pjsr/'):
                 supported = {'Sizer.jsh','StdButton.jsh','StdIcon.jsh','TextAlign.jsh'}
                 if name.split('/')[-1] not in supported:
-                    raise ValueError('Unsupported PixInsight header: '+name)
+                    raise ValueError(localize('Неподдерживаемый заголовочный файл PixInsight: ', 'Unsupported PixInsight header: ') + name)
                 result.append('')
             else:
                 result.append(preprocess(path.parent/name,root,seen))
@@ -37,7 +38,7 @@ def preprocess(path, root, seen=None):
         define = re.fullmatch(r'#define\s+([A-Za-z_]\w*)\s+(.+)',directive)
         if define:
             result.append('var '+define[1]+' = '+define[2]+';'); continue
-        raise ValueError('Unsupported PixInsight directive: '+directive)
+        raise ValueError(localize('Неподдерживаемая директива PixInsight: ', 'Unsupported PixInsight directive: ') + directive)
     seen.remove(path)
     return '\n'.join(result)
 
@@ -134,14 +135,12 @@ class Bridge(QObject):
         QMessageBox.information(None,title,text); return 1
 
     def report(self,result):
-        from core.i18n import localize
         QMessageBox.warning(None,'PixInsight',localize('Скрипт использует неподдерживаемую функцию или содержит ошибку.\n',
             'The script uses an unsupported feature or contains an error.\n')+result.toString()+'\n'+result.property('stack').toString())
 
 
 def main():
     app=QApplication(sys.argv)
-    from core.i18n import configure_interface,localize
     from PySide6.QtCore import QSettings
     configure_interface(QSettings('Astra','Astra'))
     if len(sys.argv)>2: app.setStyleSheet(Path(sys.argv[2]).read_text(encoding='utf-8'))

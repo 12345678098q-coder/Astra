@@ -40,12 +40,12 @@ class ImageHistory:
     def snapshot(self,index,current=None,current_count=None):
         entry=self.entries[index]
         if entry['path'] is None:
-            if index!=self.index or current is None:raise ValueError('Snapshot unavailable')
+            if index!=self.index or current is None:raise ValueError(localize('Сохранённое состояние недоступно'))
             return current.copy(),current_count.copy() if current_count is not None else None
         return np.load(entry['path'],allow_pickle=False),np.load(entry['count_path'],allow_pickle=False) if entry['count_path'] else None
 
     def truncate(self,last):
-        if not 0<=last<len(self.entries) or self.index>last:raise ValueError('Restore retained snapshot first')
+        if not 0<=last<len(self.entries) or self.index>last:raise ValueError(localize('Сначала восстановите сохранённое состояние'))
         removed=self.entries[last+1:]
         self.entries=self.entries[:last+1]
         for entry in removed:

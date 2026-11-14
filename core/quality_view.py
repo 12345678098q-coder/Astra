@@ -1,11 +1,12 @@
 """Display-only diagnostics. Thresholds describe display clipping, not sensor saturation."""
+from core.i18n import localize
 import numpy as np
 
 
 def paint_quality(source,rgb,mode,lo,hi,previous=None):
     counts={'black':0,'white':0,'invalid':0}
     if mode=='difference' and (previous is None or previous.shape!=source.shape):
-        raise ValueError('No compatible previous checkpoint')
+        raise ValueError(localize('Нет совместимой предыдущей контрольной точки'))
     limit=1.
     if mode=='difference':
         step=max(1,int(np.ceil(max(source.shape[:2])/1000)))

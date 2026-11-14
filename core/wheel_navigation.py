@@ -18,6 +18,23 @@ class WheelNavigation(QObject):
         event.accept();return True
     def eventFilter(self,widget,event):
         if self.forwarding or event.type()!=QEvent.Wheel or not isinstance(widget,QWidget) or not self.owner.isVisible():return False
+        control=widget
+        while control is not None and not isinstance(control,QScrollBar):
+            if isinstance(control,(QAbstractSpinBox,QComboBox)):
+                if isinstance(control,QComboBox) and control.view().isVisible():
+                    return False
+                parent=control.parentWidget()
+                while parent is not None and not isinstance(parent,QScrollArea):
+                    parent=parent.parentWidget()
+                if parent is not None:
+                    viewport=parent.viewport()
+                    forwarded=QWheelEvent(QPointF(viewport.rect().center()),event.globalPosition(),event.pixelDelta(),event.angleDelta(),event.buttons(),event.modifiers(),event.phase(),event.inverted(),event.source())
+                    self.forwarding=True
+                    try:QApplication.sendEvent(viewport,forwarded)
+                    finally:self.forwarding=False
+                event.accept()
+                return True
+            control=control.parentWidget()
         for window,record in self.owner.documents.items():
             image=record['image']
             if widget is image or image.isAncestorOf(widget):

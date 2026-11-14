@@ -10,16 +10,20 @@ from core.image_io import read
 FILTER='Астроизображения (*.fit *.fits *.fts *.tif *.tiff *.xisf);;RAW фотоаппаратов и другие файлы (*.*)'
 
 class ExternalProcessMixin:
-    def run_external(self,tool,operation,options=None,preview=False,result_handler=None):
+    def run_external(self,tool,operation,options=None,preview=False,result_handler=None,input_data=None):
+        process_data=self.data if input_data is None else input_data
         if heavy_job_running(self):
             QMessageBox.information(self,localize('Ресурсы'),localize('Дождитесь завершения текущей обработки.')); return
-        if self.data is None:
+        if process_data is None:
             QMessageBox.information(self,'Astra',self.trtext('Сначала откройте изображение.','Open an image first.')); return
         if getattr(self,'external_process',None) and self.external_process.state()!=QProcess.NotRunning:
             QMessageBox.information(self,'Astra',self.trtext('Обработка уже выполняется.','Processing is already running.')); return
         from .options import values_for
         try:options=values_for(tool+':'+operation,options)
         except (ValueError,KeyError) as error:QMessageBox.warning(self,'Astra',str(error));return
+        if tool=='graxpert':
+            from core.gpu_runtime import is_installed
+            if not is_installed():options['gpu']=False
         if tool=='rcastro' and operation=='bxt' and options['auto_settings']:
             from .bxt_auto import run_automatic
             run_automatic(self,options,preview);return
@@ -28,7 +32,7 @@ class ExternalProcessMixin:
         if not exe or not Path(exe).is_file():
             QMessageBox.information(self,'Astra',self.trtext('Укажите путь к программе в настройках.','Set the executable path in preferences.')); return
         proc=QProcess(self)
-        try:resource_plan=configure_external(proc,self.data.nbytes)
+        try:resource_plan=configure_external(proc,process_data.nbytes)
         except MemoryError as e:QMessageBox.warning(self,localize('Ресурсы'),str(e)); proc.deleteLater(); return
         source_window=self.viewwindow
         source_index=self.documents[source_window]['history'].index
@@ -36,7 +40,7 @@ class ExternalProcessMixin:
         source=folder/'input.tif'
         try:
             import tifffile
-            tifffile.imwrite(source,np.asarray(self.data,dtype=np.float32),photometric='rgb' if self.data.ndim==3 else 'minisblack')
+            tifffile.imwrite(source,np.asarray(process_data,dtype=np.float32),photometric='rgb' if process_data.ndim==3 else 'minisblack')
         except Exception as e:
             self.external_temp.cleanup(); QMessageBox.warning(self,'Astra',str(e)); return
         from . import graxpert,rcastro
@@ -54,7 +58,7 @@ class ExternalProcessMixin:
         self.external_process=proc; proc.setWorkingDirectory(str(folder)); proc.setProcessChannelMode(QProcess.MergedChannels)
         self.log_overlay.begin(tool+' · '+operation); self.log_overlay.append(resource_plan.description())
         self.log_overlay.append(self.trtext('Фото: ','Image: ')+source_window.windowTitle())
-        image_info(self.log_overlay,self.data,self.trtext('Исходное изображение','Source image'),self.trtext)
+        image_info(self.log_overlay,process_data,self.trtext('Исходное изображение','Source image'),self.trtext)
         parameters(self.log_overlay,options,self.trtext)
         self.log_overlay.append(self.trtext('Входное изображение подготовлено. Запуск внешнего инструмента.','Input image prepared. Starting external tool.'))
         self.statusBar().showMessage(resource_plan.description())
@@ -83,17 +87,7 @@ class ExternalProcessMixin:
                         QTimer.singleShot(0,self,lambda value=result:result_handler(value))
                     elif preview:
                         from core.preview_window import show_preview
-                        record=self.documents[source_window]
-                        display_stretch=None
-                        enabled=True
-                        if operation in ('nxt','denoising'):
-                            from core.preview_levels import denoise_limits
-                            limits=denoise_limits(record)
-                            enabled=record.get('stretch',False)
-                            if limits is not None:
-                                strength=record.get('strength',20)
-                                display_stretch=record.get('display_transfer',(*limits,strength))
-                        show_preview(self,result,source_window.windowTitle()+' · '+tool,enabled,source=source_window,display_stretch=display_stretch)
+                        show_preview(self,result,source_window.windowTitle()+' · '+tool,source=source_window)
                     else:self.apply_image_result(source_window,result,tool+': '+operation)
                     if extra and not preview:
                         self.data,_=read(str(extra[0]));self.count=None;self.next_image_title=localize('Фон GraXpert') if tool=='graxpert' else localize('Звёзды StarXTerminator');self.showimage()
@@ -102,6 +96,7 @@ class ExternalProcessMixin:
                 except Exception as e:
                     self.log_overlay.append(str(e));QMessageBox.warning(self,'Astra',str(e))
             else:QMessageBox.warning(self,'Astra',self.trtext('Не удалось получить единственный результат.','Could not identify a single result.')+f'\nExit code: {code} (0x{code & 0xffffffff:08X})\n'+output[-3000:])
+            proc.setProperty('astra_result_success',succeeded)
             self.log_overlay.end(localize('Завершено') if succeeded else localize('Ошибка обработки'))
             self.external_temp.cleanup()
         proc.finished.connect(finished)
@@ -111,4 +106,3 @@ class ExternalProcessMixin:
                 self.log_overlay.end(); self.external_temp.cleanup(); QMessageBox.warning(self,'Astra',proc.errorString())
         proc.errorOccurred.connect(process_error)
         proc.start(str(exe),args)
-

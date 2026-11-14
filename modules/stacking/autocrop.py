@@ -1,4 +1,5 @@
 """Crop a stack to the rectangular common footprint of its accepted lights."""
+from core.i18n import localize
 import numpy as np
 from scipy.ndimage import rotate as nd_rotate, binary_erosion
 
@@ -20,14 +21,14 @@ def _largest_rectangle(mask):
 
 def crop_bounds(mask,max_side=512):
     mask=np.asarray(mask,dtype=bool)
-    if mask.ndim!=2 or not mask.any():raise ValueError('У принятых кадров нет общей области для автокропа.')
+    if mask.ndim!=2 or not mask.any():raise ValueError(localize('У принятых кадров нет общей области для автокропа.'))
     if mask.all():return (0,0,mask.shape[1],mask.shape[0])
     step=max(1,int(np.ceil(max(mask.shape)/max_side)))
     if step==1:return _largest_rectangle(mask)
     h,w=mask.shape;ph=(-h)%step;pw=(-w)%step
     small=np.pad(mask,((0,ph),(0,pw)),constant_values=False).reshape((h+ph)//step,step,(w+pw)//step,step).all(axis=(1,3))
     left,top,right,bottom=_largest_rectangle(small)
-    if right<=left or bottom<=top:raise ValueError('Общая область слишком узкая для автокропа.')
+    if right<=left or bottom<=top:raise ValueError(localize('Общая область слишком узкая для автокропа.'))
     left*=step;top*=step;right=min(w,right*step);bottom=min(h,bottom*step)
     # Recover the few valid border pixels lost by the conservative reduction.
     while left>0 and mask[top:bottom,left-1].all():left-=1
@@ -62,8 +63,8 @@ def best_angle(mask):
 
 
 def crop_stack(data,coverage,footprint,allow_rotation=False,log=lambda _:None):
-    footprint=np.asarray(footprint,dtype=bool)
-    if footprint.shape!=data.shape[:2]:raise ValueError('Карта покрытия не совпадает с изображением.')
+    footprint=np.array(footprint,dtype=bool,copy=True)
+    if footprint.shape!=data.shape[:2]:raise ValueError(localize('Карта покрытия не совпадает с изображением.'))
     footprint &= np.isfinite(data).all(axis=-1) if data.ndim==3 else np.isfinite(data)
     angle=best_angle(footprint) if allow_rotation else 0.
     if angle:
@@ -71,8 +72,9 @@ def crop_stack(data,coverage,footprint,allow_rotation=False,log=lambda _:None):
         if coverage is not None:coverage=nd_rotate(coverage,angle,axes=(1,0),reshape=True,order=0,prefilter=False,cval=0)
         footprint=_rotate_mask(footprint,angle)
     left,top,right,bottom=crop_bounds(footprint)
-    if right<=left or bottom<=top:raise ValueError('Общая область для автокропа пуста.')
-    log(f'Автокроп: поворот {angle:+.1f}°, область {right-left} × {bottom-top}.')
+    if right<=left or bottom<=top:raise ValueError(localize('Общая область для автокропа пуста.'))
+    log(localize('Автокроп: поворот {0:+.1f}°, область {1} × {2}.',
+                 'Auto crop: rotation {0:+.1f}°, area {1} × {2}.').format(angle, right-left, bottom-top))
     cropped_count=np.array(coverage[top:bottom,left:right],copy=True) if coverage is not None else None
     return np.array(data[top:bottom,left:right],copy=True),cropped_count
 
@@ -84,14 +86,62 @@ def existing_footprint(data,coverage=None):
     nonzero=np.any(data!=0,axis=-1) if data.ndim==3 else data!=0
     if coverage is not None:
         weight=np.min(coverage,axis=-1) if coverage.ndim==3 else coverage
-        valid=finite & nonzero & (weight >= np.nanmax(weight)*.95)
+        if weight.shape!=finite.shape:raise ValueError(localize('Карта покрытия не совпадает с изображением.'))
+        # Rejection and drizzle vary the count per pixel even in full overlap.
+        # Estimate the local depth before thresholding; a single peak must not
+        # turn the useful field into disconnected strips.
+        positive=np.isfinite(weight) & (weight>0)
+        clean=np.where(np.isfinite(coverage) & (coverage>0),coverage,0)
+        # Smooth channels separately: taking their minimum first amplifies
+        # independent rejection holes in RGB stacks.
+        depth=median_filter(clean,size=(9,9,1) if clean.ndim==3 else 9,mode='nearest')
+        if depth.ndim==3:depth=np.min(depth,axis=-1)
+        reference=np.percentile(depth[positive],90) if positive.any() else 0
+        valid=finite & nonzero & positive & (depth >= reference*.95)
     else:
         valid=finite & nonzero
-    if not valid.any():raise ValueError('Не удалось определить полезную область изображения.')
-    valid=median_filter(valid.astype(np.uint8),size=5,mode='nearest').astype(bool)
+    if not valid.any():raise ValueError(localize('Не удалось определить полезную область изображения.'))
     if coverage is None:
-        valid &= _inferred_overlap(data)
+        valid &= _parallel_overlap(data) & _inferred_overlap(data)
     return valid
+
+
+def _parallel_overlap(data):
+    """Remove straight border bands, including chromatic seams in RGB exports.
+
+    Require a discontinuity across most of a side, rather than a change in
+    average brightness: gradients and individual stars are not crop borders.
+    """
+    from scipy.ndimage import median_filter
+    h,w=data.shape[:2]
+    bounds=[0,0,h,w]
+    for axis in (0,1):
+        image=np.moveaxis(np.asarray(data,dtype=np.float32),axis,0)
+        if image.ndim==2:image=image[...,None]
+        # Sample along a side only, so even a one-pixel band remains visible.
+        stride=max(1,int(np.ceil(image.shape[1]/512)))
+        image=image[:,::stride]
+        finite=np.isfinite(image)
+        if not finite.any():continue
+        image=np.where(finite,image,np.median(image[finite]))
+        image=median_filter(image,size=(1,9,1),mode='nearest')
+        profile=np.median(image,axis=1)
+        delta=np.diff(image,axis=0)
+        jumps=np.median(delta,axis=1)
+        noise=np.median(np.abs(np.diff(profile,axis=0)),axis=0)
+        spread=np.percentile(profile,99,axis=0)-np.percentile(profile,1,axis=0)
+        threshold=np.maximum(spread*.08,noise*8)
+        consistent=np.mean(delta*jumps[:,None,:]>0,axis=1)>=.9
+        strong=np.any((np.abs(jumps)>threshold) & consistent,axis=-1)
+        length=image.shape[0]; margin=max(1,int(length*.2))
+        low=np.flatnonzero(strong[:margin])
+        high=np.flatnonzero(strong[max(0,length-1-margin):])+max(0,length-1-margin)
+        if low.size:bounds[axis]=min(length,int(low[-1])+3)
+        if high.size:bounds[axis+2]=max(0,int(high[0])-1)
+    left,top,right,bottom=bounds[1],bounds[0],bounds[3],bounds[2]
+    result=np.zeros((h,w),dtype=bool)
+    result[top:bottom,left:right]=True
+    return result
 
 
 def _inferred_overlap(data):

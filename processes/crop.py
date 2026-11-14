@@ -11,7 +11,8 @@ class CropPanel(QWidget):
         super().__init__();self.window=window;self.view=None;self.updating=False
         layout=QVBoxLayout(self);note=QLabel(window.trtext('Нарисуйте рамку мышью. Углы меняют размер, круглая ручка под рамкой поворачивает её. Внутри рамки перетаскивайте область; средняя кнопка перемещает фото.','Draw a frame with the mouse. Corners resize it; the round handle below it rotates it. Drag inside to move the frame; the middle button pans the image.'));note.setWordWrap(True);layout.addWidget(note)
         draw=QPushButton(window.trtext('Нарисовать новую рамку','Draw a new frame'));draw.clicked.connect(self.new_frame);layout.addWidget(draw)
-        form=QFormLayout();layout.addLayout(form)
+        self.instructions=note
+        form=QFormLayout();self.form=form;self.guided_fields_hidden=None;layout.addLayout(form)
         self.preset=QComboBox()
         for label,ratio in PRESETS:self.preset.addItem(localize(label),ratio)
         self.preset.setCurrentIndex(max(0,self.preset.findText(localize(str(window.settings.value('crop/preset',PRESETS[0][0]))))))
@@ -26,6 +27,7 @@ class CropPanel(QWidget):
         self.rotation_label=QLabel(window.trtext('Угол рамки: 0°','Frame angle: 0°'));layout.addWidget(self.rotation_label)
         reset_angle=QPushButton(window.trtext('Сбросить поворот рамки','Reset frame rotation'));reset_angle.clicked.connect(self.reset_rotation);layout.addWidget(reset_angle)
         transforms=QVBoxLayout()
+        self.rotation_buttons=[]
         layout.addLayout(transforms)
         for operation,ru,en in (
             ('left','↶ 90° влево','↶ 90° left'),
@@ -34,13 +36,19 @@ class CropPanel(QWidget):
             ('vertical','Отразить по вертикали','Flip vertically')):
             button=QPushButton(window.trtext(ru,en))
             button.setProperty('linkedAction',True)
-            button.setToolTip(window.trtext('Применить ко всему фото и добавить шаг истории.','Apply to the whole image and add a history step.'))
+            button.setToolTip(window.trtext('Применить ко всему фото.','Apply to the whole image.'))
             button.clicked.connect(lambda checked=False,op=operation:self.transform(op))
             transforms.addWidget(button)
+            if operation in ('left','right'):self.rotation_buttons.append(button)
         self.auto_rotate=QCheckBox(window.trtext('Автоповорот','Auto rotate'));layout.addWidget(self.auto_rotate)
         auto=QPushButton(window.trtext('Автокроп','Auto crop'));auto.clicked.connect(self.auto_crop);layout.addWidget(auto)
-        for ru,en,callback in [('По центру','Center',self.center),('Предпросмотр','Preview',self.preview),('Отмена','Cancel',self.cancel),('Сбросить область','Reset region',self.reset),('Применить кроп','Apply crop',self.apply)]:
+        for ru,en,callback in [('По центру','Center',self.center),('Предпросмотр','Preview',self.preview),('Отмена','Cancel',self.cancel),('Сбросить область','Reset region',self.reset),('Применить кроп','Apply crop',self.apply_from_button)]:
             button=QPushButton(window.trtext(ru,en));button.clicked.connect(callback);layout.addWidget(button)
+    def set_tool_mode(self,mode):
+        from core.tool_modes import ToolMode
+        full=mode==ToolMode.FULL
+        self.instructions.setVisible(full)
+        for button in self.rotation_buttons:button.setVisible(full)
     def ratio(self):
         ratio=self.preset.currentData()
         if ratio=='source':
@@ -84,6 +92,15 @@ class CropPanel(QWidget):
         if self.view is not None:
             self.view.crop_rect=None;self.view.crop_angle=0.;self.view.crop_start=None;self.view.crop_action=None;self.view.setCursor(Qt.CrossCursor);self.view.update()
     def sync(self,enabled=True):
+        guided=bool(self.window.tool_panel.property('guidedEmbedded'))
+        from core.tool_modes import ToolMode
+        self.set_tool_mode(ToolMode.QUICK if guided else ToolMode.FULL)
+        if guided!=self.guided_fields_hidden:
+            from core.tool_modes import profile_for,ToolMode
+            fields={'orientation':self.orientation,**self.fields}
+            visible=profile_for('crop').visible_fields(ToolMode.QUICK if guided else ToolMode.FULL,fields)
+            for key,field in fields.items():self.form.setRowVisible(field,key in visible)
+            self.guided_fields_hidden=guided
         for record in self.window.documents.values():record['image'].crop_enabled=False;record['image'].update()
         source=self.window.mdi.activeSubWindow();self.view=None
         if source not in self.window.documents:return
@@ -133,29 +150,40 @@ class CropPanel(QWidget):
     def preview(self):
         source=self.window.mdi.activeSubWindow()
         if source not in self.window.documents or self.view is None:return
-        self.edit('w');r=self.view.crop_rect
+        r = self.view.crop_rect
         if r is None:return
         from core.preview_window import show_preview
         from processes.native.rotate import crop_rotated
         data,_=crop_rotated(self.window.documents[source]['data'],None,(r.x(),r.y(),r.width(),r.height()),self.view.crop_angle)
-        show_preview(self.window,data,source.windowTitle()+' · Crop',True,source=source)
-    def apply(self):
+        show_preview(self.window,data,source.windowTitle()+' · Crop',source=source)
+    def apply_from_button(self):
+        self.apply(prompt_for_frame=True)
+
+    def apply(self, *, prompt_for_frame=False):
         window=self.window;source=window.mdi.activeSubWindow()
-        if source not in window.documents or self.view is None:return
-        if heavy_job_running(window):QMessageBox.information(self,'Astra',localize('Дождитесь завершения обработки.'));return
-        self.edit('w');r=self.view.crop_rect
-        if r is None:return
-        data=window.documents[source]['data'];x,y,w,h=r.x(),r.y(),r.width(),r.height()
-        if (x,y,w,h)==(0,0,data.shape[1],data.shape[0]) and not self.view.crop_angle:return
+        if source not in window.documents:return False
+        if heavy_job_running(window):QMessageBox.information(self,'Astra',localize('Дождитесь завершения обработки.'));return False
+        record = window.documents[source]
+        view = record['image']
+        data = record['data']
+        r = view.crop_rect
+        angle = view.crop_angle
+        if r is None or (r == QRect(0, 0, data.shape[1], data.shape[0]) and not angle):
+            if prompt_for_frame:
+                window.statusBar().showMessage(window.trtext(
+                    'Нарисуйте рамку или уменьшите её, чтобы обрезать фото.',
+                    'Draw or resize the frame to crop the photo.'), 6000)
+            return not prompt_for_frame
+        x,y,w,h=r.x(),r.y(),r.width(),r.height()
         try:
             require_memory(w*h*data.dtype.itemsize*(data.shape[-1] if data.ndim==3 else 1),localize('Кроп'))
             coverage=window.documents[source]['count']
             from processes.native.rotate import crop_rotated
-            cropped,cropped_coverage=crop_rotated(data,coverage,(x,y,w,h),self.view.crop_angle)
-            angle=self.view.crop_angle
+            cropped,cropped_coverage=crop_rotated(data,coverage,(x,y,w,h),angle)
             window.apply_image_result(source,cropped,'Crop'+(f' {angle:+.1f}°' if angle else ''),cropped_coverage)
-            self.view.crop_rect=None;self.view.crop_angle=0.;self.read_rect();self.view.fit_image()
-        except Exception as error:QMessageBox.warning(self,'Astra',str(error))
+            view.crop_rect=None;view.crop_angle=0.;self.read_rect();view.fit_image()
+            return True
+        except Exception as error:QMessageBox.warning(self,'Astra',str(error));return False
 
     def auto_crop(self):
         window=self.window;source=window.mdi.activeSubWindow()

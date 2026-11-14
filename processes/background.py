@@ -48,7 +48,7 @@ def run_background(window,options,preview=False):
                 raise ValueError(localize('Исходное состояние изменилось. Повторите обработку.'))
             if preview:
                 from core.preview_window import show_preview
-                show_preview(window,result,source.windowTitle()+' · BN',True,source=source)
+                show_preview(window,result,source.windowTitle()+' · BN',source=source)
             else:window.apply_image_result(source,result,localize('Автовыравнивание фона'))
             image_info(window.log_overlay,result,window.trtext('Результат','Result'),window.trtext)
             window.log_overlay.append(localize('Готово.'))
@@ -60,3 +60,4 @@ def run_background(window,options,preview=False):
     job.finished.connect(window.log_overlay.end)
     job.finished.connect(job.deleteLater)
     job.start()
+    return job

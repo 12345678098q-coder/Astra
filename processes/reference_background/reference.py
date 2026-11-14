@@ -36,7 +36,7 @@ def fetch(header,shape,survey,cancel=lambda:False,progress=lambda a,b:None,cache
         try:
             with fits.open(cache_path,memmap=False,checksum=True) as hdus:
                 array=np.array(hdus[0].data,dtype=float)
-                if hdus[0].verify_checksum()!=1 or array.shape!=(out['NAXIS2'],out['NAXIS1']):raise ValueError('Invalid cache')
+                if hdus[0].verify_checksum()!=1 or array.shape!=(out['NAXIS2'],out['NAXIS1']):raise ValueError(localize('Некорректные данные в кеше'))
             return {'data':array,'step':step,'header':out,'survey':survey,'cached':True}
         except (OSError,ValueError):pass
     request_header=out

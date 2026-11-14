@@ -3,6 +3,7 @@ from core.responsive import set_em_size
 from core.i18n import localize
 import json
 import numpy as np
+from core.image_selector import ImageSelector
 from PySide6.QtCore import Qt,QPointF
 from PySide6.QtGui import QImage,QPixmap,QPainter,QPen,QColor
 from PySide6.QtWidgets import QDialog,QHBoxLayout,QVBoxLayout,QFormLayout,QComboBox,QPushButton,QLabel,QCheckBox,QSpinBox,QDoubleSpinBox,QProgressBar,QWidget,QMessageBox,QScrollArea
@@ -43,8 +44,8 @@ class NebulaMaskDialog(QDialog):
   try:settings=json.loads(owner.settings.value('process_options/nebula_mask_builder','{}'))
   except (ValueError,TypeError):settings={}
   if not isinstance(settings,dict):settings={}
-  root=QHBoxLayout(self);self.view=SampleView(self);root.addWidget(self.view,3);sidebar=QWidget();sidebar.setMinimumWidth(0);side=QVBoxLayout(sidebar);side.setContentsMargins(0,0,0,0);self.sidebar_scroll=QScrollArea();self.sidebar_scroll.setWidgetResizable(True);self.sidebar_scroll.setWidget(sidebar);set_em_size(self.sidebar_scroll,'setMinimumWidth',12);root.addWidget(self.sidebar_scroll,1)
-  self.targets=QComboBox();set_em_size(self.targets,'setMinimumWidth',15.0);side.addWidget(self.targets)
+  root=QHBoxLayout(self);self.view=SampleView(self);root.addWidget(self.view,3);sidebar=QWidget();sidebar.setMinimumWidth(0);side=QVBoxLayout(sidebar);side.setContentsMargins(0,0,0,0);self.sidebar_scroll=QScrollArea();self.sidebar_scroll.setWidgetResizable(True);self.sidebar_scroll.setWidget(sidebar);root.addWidget(self.sidebar_scroll,1)
+  self.targets=ImageSelector(self.refresh);set_em_size(self.targets,'setMinimumWidth',15.0);side.addWidget(self.targets)
   refresh=QPushButton(self.trtext('Обновить список кадров','Refresh images'));refresh.clicked.connect(self.refresh);side.addWidget(refresh)
   self.controls=QWidget();form=QFormLayout(self.controls);form.setRowWrapPolicy(QFormLayout.WrapLongRows);side.addWidget(self.controls)
   self.classes=QComboBox()
@@ -64,16 +65,22 @@ class NebulaMaskDialog(QDialog):
   help=QLabel(self.trtext('Левый щелчок - образец; правый - удалить ближайший. Колесо - масштаб, средняя кнопка или Ctrl + перетаскивание - перемещение. Нужны образцы фона, Hα и OIII. Звёзды - необязательно.','Left click samples; right click removes the nearest sample. Wheel zooms; middle button or Ctrl + drag pans. Sample Background, H-alpha and OIII. Stars are optional.'));help.setWordWrap(True);set_em_size(help,'setMaximumWidth',18.75);side.addWidget(help)
   note=QLabel(self.trtext('Маски по цвету, не физическое разделение спектральных линий. Расчёт использует исходный RGB; предрастяжка влияет только на просмотр.','Color masks, not physical spectral-line separation. Computation uses original RGB; screen stretch only affects display.'));note.setWordWrap(True);set_em_size(note,'setMaximumWidth',18.75);side.addWidget(note)
   help.setToolTip(help.text());help.setText(self.trtext('ЛКМ - образец, ПКМ - удалить. Колесо - масштаб, средняя кнопка - перемещение.','Left click samples; right click removes. Wheel zooms; middle button pans.'))
-  note.setToolTip(note.text());note.setText(self.trtext('Отметьте фон, Hα и OIII. Звёзды и SII — необязательно. AUTO использует выбранную палитру.','Sample Background, H-alpha and OIII. Stars and SII are optional. AUTO uses the selected palette.'))
+  note.setToolTip(note.text());note.setText(self.trtext('Отметьте фон, Hα и OIII. Звёзды и SII – необязательно. AUTO использует выбранную палитру.','Sample Background, H-alpha and OIII. Stars and SII are optional. AUTO uses the selected palette.'))
   self.status=QLabel();self.status.setWordWrap(True);set_em_size(self.status,'setMaximumWidth',18.75);side.addWidget(self.status);self.progress=QProgressBar();side.addWidget(self.progress);self.progress.hide();side.addStretch()
   self.auto_button=QPushButton('AUTO');self.auto_button.clicked.connect(lambda:self.execute(False,True));side.addWidget(self.auto_button)
   self.preview_button=QPushButton(self.trtext('Предпросмотр выбранной маски','Preview selected mask'));self.preview_button.clicked.connect(lambda:self.execute(True));side.addWidget(self.preview_button)
   reset=QPushButton(self.trtext('Сброс','Reset'));reset.clicked.connect(self.reset);side.addWidget(reset)
   cancel=QPushButton(self.trtext('Отмена','Cancel'));cancel.clicked.connect(self.cancel);side.addWidget(cancel)
-  self.run_button=QPushButton(self.trtext('Создать маски','Create masks'));self.run_button.clicked.connect(lambda:self.execute(False));side.addWidget(self.run_button)
+  self.run_button=QPushButton(self.trtext('Создать маски','Create masks'));self.run_button.setProperty('astraPrimaryAction',True);self.run_button.clicked.connect(lambda:self.execute(False));side.addWidget(self.run_button)
+  form.setRowWrapPolicy(QFormLayout.WrapAllRows)
+  from PySide6.QtWidgets import QSizePolicy
+  for selector in sidebar.findChildren(QComboBox):
+   selector.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Fixed)
+  side.activate()
+  self.sidebar_scroll.setMinimumWidth(sidebar.minimumSizeHint().width()+self.sidebar_scroll.verticalScrollBar().sizeHint().width()+2*self.sidebar_scroll.frameWidth())
   self.targets.currentIndexChanged.connect(self.select);self.refresh()
   self.radius.setToolTip(self.trtext('Радиус новых кругов в пикселях исходного кадра.','Radius of new sample disks in source-image pixels.'))
-  self.sensitivity.setToolTip(self.trtext('Больше — более жёсткое разделение классов. Не влияет на HOO AUTO.','Higher values separate classes more sharply. Does not affect HOO AUTO.'))
+  self.sensitivity.setToolTip(self.trtext('Больше – более жёсткое разделение классов. Не влияет на HOO AUTO.','Higher values separate classes more sharply. Does not affect HOO AUTO.'))
   self.smoothness.setToolTip(self.trtext('Сигма гауссова сглаживания масок; 0 отключает сглаживание.','Gaussian smoothing sigma for masks; 0 disables smoothing.'))
   self.stars.setToolTip(self.trtext('Создавать отдельный Stars_mask. Звёздные образцы учитываются и без этой галочки.','Publish a separate Stars_mask. Star samples compete even when this box is unchecked.'))
   self.stretch.setToolTip(self.trtext('Меняет только отображение, расчёт использует исходные RGB-значения.','Changes display only; calculation uses original RGB samples.'))

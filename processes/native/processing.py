@@ -41,7 +41,7 @@ def block_rows(data):
 
 
 def operation_memory(data, operation):
-    if operation in ('color','histogram','scnr','curves','hdr','defects','motion'):
+    if operation in ('color','histogram','scnr','curves','hdr','defects','motion','narrowband'):
         from core.resources import MIB
         return 16*MIB + int(np.prod(data.shape[1:]))*8*block_rows(data)*32
     return data.size*8*12
@@ -62,6 +62,16 @@ def copy_image(data):
     return result
 
 
+def stretch_block(block,channels):
+    out=transfer(block.astype(np.float64),channels.get('All',{}))
+    if block.ndim==3:
+        for index,key in enumerate('RGB'):
+            if key in channels:out[...,index]=transfer(out[...,index],channels[key])
+    invalid=~np.isfinite(block)
+    out[invalid]=block[invalid]
+    return out
+
+
 def stretch(data,settings,cancel=lambda:False,progress=lambda done,total:None):
     source=image(data);channels=settings.get('channels',{})
     if source.ndim==2 and any(key in channels for key in 'RGB'):
@@ -69,12 +79,8 @@ def stretch(data,settings,cancel=lambda:False,progress=lambda done,total:None):
     result=output_image(source);rows=block_rows(source)
     for y in range(0,source.shape[0],rows):
         if cancel():raise InterruptedError(localize('Отменено'))
-        block=source[y:y+rows];out=transfer(block.astype(np.float64),channels.get('All',{}))
-        if source.ndim==3:
-            for i,key in enumerate('RGB'):
-                if key in channels:out[...,i]=transfer(out[...,i],channels[key])
-        invalid=~np.isfinite(block);out[invalid]=block[invalid]
-        result[y:y+rows]=out;progress(min(y+rows,source.shape[0]),source.shape[0])
+        result[y:y+rows]=stretch_block(source[y:y+rows],channels)
+        progress(min(y+rows,source.shape[0]),source.shape[0])
     return result
 
 
@@ -176,6 +182,9 @@ def apply_operation(data,operation,settings,mask=None,cancel=lambda:False,progre
     if operation in ('scnr','lhe','hdr','curves'):
         from .advanced import run
         result=run(data,operation,settings,cancel,progress)
+    elif operation=='narrowband':
+        from .narrowband import normalize
+        result=normalize(data,settings,cancel,progress)
     elif operation=='histogram':result=stretch(data,settings,cancel,progress)
     elif operation=='color':result=color_balance(data,settings,cancel,progress)
     elif operation=='defects':

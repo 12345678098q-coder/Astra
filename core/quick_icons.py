@@ -20,9 +20,12 @@ def document_icon(kind,color):
     elif kind=='low_preview':
         painter.drawRect(2,3,20,14);painter.drawLine(8,21,16,21);painter.drawLine(12,17,12,21)
         painter.drawRect(5,6,4,4);painter.drawRect(12,9,5,5)
-    elif kind=='split_rgb':
-        for x,y,c in [(3,3,'#d88181'),(8,8,'#82b98c'),(13,13,'#84a9d0')]:
+    elif kind in ('split_rgb','luminance'):
+        colours=('#d88181','#82b98c','#84a9d0') if kind=='split_rgb' else (color,color,color)
+        for (x,y),c in zip(((3,3),(8,8),(13,13)),colours):
             painter.setPen(QPen(QColor(c),1.6));painter.drawRect(x,y,8,8)
+        if kind=='luminance':
+            painter.setBrush(QColor(color));painter.drawRect(15,15,4,4)
     else:
         painter.drawEllipse(3,3,18,18);painter.setBrush(QColor(color))
         painter.drawPie(QRect(3,3,18,18),90*16,180*16)

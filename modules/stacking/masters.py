@@ -5,6 +5,13 @@ from astropy.io import fits
 import tifffile
 from core.master_io import tiff_header
 
+_CATEGORY_LABELS = {'Lights': 'Лайты', 'Darks': 'Дарки', 'Flats': 'Флеты', 'Dark flats': 'Дарк-флеты'}
+
+
+def category_label(category):
+    return localize(_CATEGORY_LABELS.get(category, category), category)
+
+
 def master_header(path):
     suffix=Path(path).suffix.lower()
     if suffix in ('.fits','.fit','.fts'):
@@ -25,7 +32,7 @@ def check_master_groups(groups,explicit=()):
         paths=groups.get(category,[])
         masters=[p for p in paths if is_master(p,explicit)]
         if masters and len(paths)!=1:
-            raise ValueError(category+localize(': выберите один мастер либо исходные кадры. Смешивать их нельзя.'))
+            raise ValueError(category_label(category)+localize(': выберите один мастер либо исходные кадры. Смешивать их нельзя.'))
         for path in masters:
             kind=master_header(path).get('MASTERTY')
-            if kind and kind!=category:raise ValueError(localize('{0}: мастер {1} добавлен в {2}.').format(path, kind, category))
+            if kind and kind!=category:raise ValueError(localize('{0}: мастер {1} добавлен в {2}.').format(path, category_label(kind), category_label(category)))

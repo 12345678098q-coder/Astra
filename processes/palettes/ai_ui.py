@@ -47,7 +47,7 @@ class PaletteAI(BasePanel):
         try:
             from PaletteLab.engine import load_model
             meta=json.loads(load_model(path)['meta'])
-            self.status.setText(self.tr('Экспериментальная версия; результат проверяйте в предпросмотре.','Experimental version; inspect the preview before applying.'))
+            self.status.setText(self.tr('Экспериментальная версия.','Experimental version.'))
         except Exception as error:self.status.setText(str(error))
     def reset(self):self.cancel();self.fields['strength'].setValue(70);self.fields['preserve'].setChecked(True);self.range.setCurrentIndex(0)
     def cancel(self):self.generation+=1;super().cancel()
@@ -76,5 +76,6 @@ class PaletteAI(BasePanel):
             if apply:self.clear_preview();self.window.apply_image_result(source,result,'PAL-AI')
             else:
                 from core.preview_window import show_preview
-                self.temporary_preview=show_preview(self.window,result,source.windowTitle()+' · Palette AI',False,source=source,display_range=(0,scale))
+                self.temporary_preview=show_preview(self.window,result,source.windowTitle()+' · Palette AI',source=source)
+                self.temporary_preview.tool_owner=self
         launch(self.window,'Palette AI',work,done,data.size*64+64*1024**2)

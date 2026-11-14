@@ -4,13 +4,14 @@ from pathlib import Path
 from datetime import datetime
 import numpy as np
 from astropy.io import fits
-from .engine import stack,validate_frames
 
 class Job(QThread):
     note=Signal(str); done=Signal(object); error=Signal(str); progress=Signal(int,int,str)
     def __init__(self,groups,options): super().__init__(); self.groups=groups; self.options=options
     def run(self):
         try:
+            from .engine import stack
+
             result=stack(self.groups,self.note.emit,{**self.options,'_cancel':self.isInterruptionRequested},self.progress.emit)
             if self.isInterruptionRequested():return
             if self.options.get('autosave_dir'):
@@ -32,6 +33,8 @@ class FrameCheckJob(QThread):
     done=Signal(object); error=Signal(str); progress=Signal(int,int,str)
     def __init__(self,groups,master_paths=()):super().__init__(); self.groups=groups; self.master_paths=master_paths
     def run(self):
-        try:self.done.emit(validate_frames(self.groups,self.progress.emit,self.master_paths))
-        except Exception as e:self.error.emit(str(e))
+        try:
+            from .engine import validate_frames
 
+            self.done.emit(validate_frames(self.groups,self.progress.emit,self.master_paths))
+        except Exception as e:self.error.emit(str(e))

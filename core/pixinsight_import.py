@@ -152,6 +152,7 @@ def open_imported_modules(window):
 
 
 def install_imported_menu(menu, window):
+    menu.addSeparator()
     imported = menu.addMenu(window.trtext('Импортированные модули','Imported modules'))
     def refresh():
         imported.clear()
@@ -161,5 +162,4 @@ def install_imported_menu(menu, window):
             action.triggered.connect(lambda checked=False,p=path:launch_script(window,p))
         imported.addAction(window.trtext('Все импортированные файлы…','All imported files…'),lambda:open_imported_modules(window))
     imported.aboutToShow.connect(refresh)
-    menu.addSeparator()
     menu.addAction(window.trtext('Добавить модуль…','Add module…'),lambda:open_imported_modules(window))

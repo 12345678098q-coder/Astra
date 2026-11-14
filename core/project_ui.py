@@ -46,11 +46,13 @@ class ProjectMixin:
                 'graxpert_points':record.get('graxpert_points',[]),'graxpert_points_shape':record.get('graxpert_points_shape'),
                 'visible':not window.isHidden(),'maximized':window.isMaximized(),'minimized':window.isMinimized(),
                 'stretch':record['stretch'],'strength':record['strength'],'auto_stretch':record.get('auto_stretch',False),
+                'capture_metadata':record.get('capture_metadata',{}),
                 'scale':image.scale,'offset':[image.offset.x(),image.offset.y()],'fitted':image.fitted,
                 'annotations':image.annotations,'annotation_options':image.annotation_options,'annotations_visible':image.annotations_visible,
                 'crop':list(image.crop_rect.getRect()) if image.crop_rect else None,
                 'nebula_samples':record.get('nebula_samples',[[],[],[],[]]),
-                'split':record['history_panel'].parentWidget().sizes(),
+                'split':(record.get('history_split',[180,800]) if record['history_panel'].isHidden()
+                         else record['history_panel'].parentWidget().sizes()),
                 'wcs':record['wcs_header'].tostring() if record.get('wcs_header') is not None else None})
             records.append(record)
         settings={key:self.settings.value(key) for key in self.settings.allKeys() if key in KEYS or key.startswith(PREFIXES)}
@@ -62,7 +64,8 @@ class ProjectMixin:
             'selected_tool':next((key for key,(page,_) in self.tool_panel.entries.items() if page is self.tool_panel.pages.currentWidget()),None),
             'active':windows.index(self.mdi.activeSubWindow()) if self.mdi.activeSubWindow() in windows else None,
             'main_geometry':bytes(self.saveGeometry().toBase64()).decode(),'main_state':bytes(self.saveState().toBase64()).decode(),
-            'history_visible':self.history_view_action.isChecked(),'tools_visible':not self.tools_dock.isHidden(),
+            'history_visible':self.history_view_action.isChecked(),'guided_mode':self.guided_action.isChecked(),
+            'tools_visible':not self.tools_dock.isHidden(),
             'tabbed':self.mdi.viewMode()==QMdiArea.TabbedView,
             'toolbar':[key for key,action in self.actions.items() if action in self.toolbar.actions()],
             'stack':stack,'stack_options':self.stack_options,'bayer':self.bayer.currentData(),
@@ -129,10 +132,15 @@ class ProjectMixin:
             for document in loaded:
                 self.data=document['data'];self.count=document['count'];self.next_image_title=document['title'];self.showimage(tile=False)
                 window=self.viewwindow;created.append(window);record=self.documents[window];record['history'].close()
+                # Old windows remain alive until restoration succeeds. Their
+                # titles must not make a restored document look like a copy.
+                window.setWindowTitle(document['title'])
                 record.update({key:document[key] for key in ('history','data','count','strength','stretch','auto_stretch')})
                 record['channel']=document.get('channel') if document.get('channel') in ('R','G','B') else None
                 record['view_group']=document.get('view_group')
                 record['preview_ranges']=document.get('preview_ranges',{})
+                from processes.testing.spcc_auto import capture_metadata
+                record['capture_metadata']=capture_metadata(document.get('capture_metadata',{}))
                 record['reference_background_regions']=document.get('reference_background_regions',{})
                 record['reference_background_shape']=document.get('reference_background_shape')
                 record['graxpert_points']=document.get('graxpert_points',[]);record['graxpert_points_shape']=document.get('graxpert_points_shape')
@@ -151,17 +159,27 @@ class ProjectMixin:
             record=self.documents.pop(window);record['history'].close();self.mdi.removeSubWindow(window);window.deleteLater()
         for key in list(self.tool_panel.entries):self.tool_panel.close_tool(key)
         for key in self.settings.allKeys():
+            if key=='tools/pinned':continue
             if key in KEYS or key.startswith(PREFIXES):self.settings.remove(key)
         for key,value in manifest.get('settings',{}).items():
+            if key=='tools/pinned' and self.settings.contains(key):continue
             if key in KEYS or key.startswith(PREFIXES):self.settings.setValue(key,value)
         self.apply_workspace_theme();self.toolbar.clear()
         for key in manifest.get('toolbar',[]):
             if key in self.actions:self.toolbar.addAction(self.actions[key])
         self.restoreGeometry(QByteArray.fromBase64(manifest['main_geometry'].encode()));self.restoreState(QByteArray.fromBase64(manifest['main_state'].encode()))
         self.mdi.setViewMode(QMdiArea.TabbedView if manifest.get('tabbed') else QMdiArea.SubWindowView)
-        self.history_view_action.setChecked(manifest.get('history_visible',True))
+        # Older projects recorded the temporary hiding of history in guided mode.
+        legacy_guided='guided_mode' not in manifest and not self.guided_dock.isHidden()
+        history_visible=legacy_guided or manifest.get('history_visible',True)
+        self.history_view_action.setChecked(history_visible)
+        self.set_history_visible(history_visible)
         for window,document in zip(created,loaded):
-            window.showNormal();window.setGeometry(*document['geometry']);record=self.documents[window];record['history_panel'].parentWidget().setSizes(document['split'])
+            window.showNormal();window.setGeometry(*document['geometry']);record=self.documents[window]
+            sizes=document['split']
+            if legacy_guided and not sizes[0]:sizes=[180,800]
+            record['history_split']=sizes
+            record['history_panel'].parentWidget().setSizes(sizes)
             record['nebula_samples']=document.get('nebula_samples',[[],[],[],[]])
             self.mdi.setActiveSubWindow(window);self.activate_document(window);self.render()
             image=record['image'];image.fitted=document['fitted']
@@ -188,10 +206,12 @@ class ProjectMixin:
         for key in manifest.get('tools',[]):
             try:self.open_tool(key)
             except KeyError:continue
+        self.tool_panel.restore_pinned()
         selected=manifest.get('selected_tool')
+        if selected=='native:oxygen':selected='native:narrowband'
         if selected in self.tool_panel.entries:self.open_tool(selected)
         self.tools_dock.setVisible(manifest.get('tools_visible',True))
-        from modules.stacking.engine import DEFAULT_STACK_OPTIONS
+        from modules.stacking.defaults import DEFAULT_STACK_OPTIONS
         self.stack_options={**DEFAULT_STACK_OPTIONS,**manifest.get('stack_options',self.stack_options)};self.bayer.setCurrentIndex(max(0,self.bayer.findData(manifest.get('bayer','Моно'))))
         self.selection_check.blockSignals(True);self.selection_percent.blockSignals(True);self.selection_check.setChecked(self.stack_options['selection_enabled']);self.selection_percent.setValue(self.stack_options['selection_percent']);self.selection_percent.setEnabled(self.selection_check.isChecked());self.selection_check.blockSignals(False);self.selection_percent.blockSignals(False)
         self.settings.setValue('stack_options',json.dumps(self.stack_options))

@@ -288,8 +288,9 @@ class ImageView(QWidget):
         zoom.addAction(localize('Другой…'),self.choose_zoom_percent)
         stretch=menu.addAction(localize('Автопредрастяжка'))
         stretch.setCheckable(True); stretch.setChecked(self.stretched); stretch.toggled.connect(self.stretchRequested)
-        menu.addSeparator()
-        menu.addAction(localize('Переименовать изображение…'),self.renameRequested.emit)
-        menu.addAction(localize('Разделить RGB на изображения'),self.splitRequested.emit)
-        menu.addAction(localize('Извлечь яркость'),self.luminanceRequested.emit)
+        if not self.property('previewOnly'):
+            menu.addSeparator()
+            menu.addAction(localize('Переименовать изображение…'),self.renameRequested.emit)
+            menu.addAction(localize('Разделить RGB на изображения'),self.splitRequested.emit)
+            menu.addAction(localize('Извлечь яркость'),self.luminanceRequested.emit)
         menu.exec(event.globalPos())

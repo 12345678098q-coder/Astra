@@ -20,6 +20,14 @@ def solution(header,shape):
     if not np.isfinite([center.ra.degree,center.dec.degree,*scale,angle]).all():raise ValueError(localize('Некорректное WCS-решение.'))
     return wcs.to_header(relax=True),localize('RA: {0}\nDec: {1}\nМасштаб: {2:.3f} × {3:.3f} ″/px\nУгол оси Y к северу: {4:.2f}°').format(center.ra.to_string(unit='hour', sep=':', precision=2), center.dec.to_string(sep=':', precision=1, alwayssign=True), scale[0], scale[1], angle)
 
+def astap_arguments(path, options):
+    from .astap_updates import HOME
+    args = ['-f', str(path), '-ra', str(options['ra']), '-spd', str(options['dec']+90),
+            '-r', str(options['radius']), '-fov', str(options['fov']), '-z', str(options['downsample']), '-wcs']
+    if (HOME/'catalog'/'installed.json').is_file():
+        args.extend(('-d', str(HOME/'catalog')))
+    return args
+
 class AstrometryPanel(QWidget):
     def __init__(self,window):
         super().__init__();self.window=window
@@ -82,9 +90,7 @@ class AstrometryPanel(QWidget):
             fits.writeto(path,mono,overwrite=True)
         except Exception as error:QMessageBox.warning(self,'ASTAP',str(error));return
         self.save_settings();v={key:field.value() for key,field in self.fields.items()}
-        args=['-f',str(path),'-ra',str(v['ra']),'-spd',str(v['dec']+90),'-r',str(v['radius']),'-fov',str(v['fov']),'-z',str(v['downsample']),'-wcs']
-        from .astap_updates import HOME
-        if (HOME/'catalog/installed.json').is_file():args+=['-d',str(HOME/'catalog')]
+        args=astap_arguments(path,v)
         w.astrometry_process=proc;w.log_overlay.begin(localize('Астрометрия · ASTAP'));w.log_overlay.append(plan.description());self.result.setText(localize('Выполняется решение…'))
         proc.setProcessChannelMode(QProcess.MergedChannels);proc.readyReadStandardOutput.connect(lambda:w.log_overlay.append(bytes(proc.readAllStandardOutput()).decode(errors='replace')))
         done=[False]

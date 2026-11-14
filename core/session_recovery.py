@@ -3,6 +3,7 @@
 History files are pinned with hard links before the worker starts: branching or
 closing a document cannot remove a snapshot that is being written.
 """
+from core.i18n import localize
 import copy
 import hashlib
 import json
@@ -57,10 +58,12 @@ class SessionRecovery(QObject):
         self.root.mkdir(parents=True,exist_ok=True)
         self.path=self.root/(uuid.uuid4().hex+'.astra')
         self.lock=QLockFile(str(self.path.with_suffix('.lock')));self.lock.setStaleLockTime(0)
-        if not self.lock.tryLock(0):raise OSError('Recovery session lock unavailable')
+        if not self.lock.tryLock(0):raise OSError(localize('Не удалось получить блокировку сеанса восстановления'))
         self.timer=QTimer(self);self.timer.setInterval(60000);self.timer.timeout.connect(self.checkpoint);self.timer.start()
 
     def offer_restore(self):
+        import sys
+        if len(sys.argv)==3 and sys.argv[1]=='--restore-session':return
         for path in sorted(self.root.glob('*.astra'),key=lambda p:p.stat().st_mtime,reverse=True):
             if path==self.path:continue
             lock=QLockFile(str(path.with_suffix('.lock')));lock.setStaleLockTime(0)

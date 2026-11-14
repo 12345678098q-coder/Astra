@@ -7,7 +7,6 @@ from PySide6.QtWidgets import QWidget,QHBoxLayout,QLabel,QToolButton,QApplicatio
 class WindowButton(QToolButton):
     def __init__(self,kind,window):
         super().__init__();self.kind=kind;self.owner=window;set_em_size(self,'setFixedSize',2.625,2.0)
-        self.setAccessibleName(kind)
     def paintEvent(self,event):
         super().paintEvent(event)
         painter=QPainter(self);painter.setRenderHint(QPainter.Antialiasing)
@@ -29,11 +28,19 @@ class WindowHeader(QWidget):
         layout=QHBoxLayout(self);layout.setContentsMargins(10,2,2,2);layout.setSpacing(0);layout.setAlignment(Qt.AlignVCenter)
         icon=QLabel();icon.setPixmap(window.windowIcon().pixmap(22,22));icon.setAttribute(Qt.WA_TransparentForMouseEvents);layout.addWidget(icon,0,Qt.AlignVCenter);layout.addSpacing(7)
         title=QLabel('Astra');title.setAlignment(Qt.AlignVCenter);title.setAttribute(Qt.WA_TransparentForMouseEvents);layout.addWidget(title,0,Qt.AlignVCenter);layout.addSpacing(12)
-        menu.setObjectName('headerMenu');menu.setNativeMenuBar(False);menu.setSizePolicy(QSizePolicy.Expanding,QSizePolicy.Fixed);layout.addWidget(menu,1,Qt.AlignVCenter)
+        menu.setObjectName('headerMenu');menu.setNativeMenuBar(False);menu.setSizePolicy(QSizePolicy.Maximum,QSizePolicy.Fixed);layout.addWidget(menu,0,Qt.AlignVCenter)
+        guided=getattr(window,'guided_action',None)
+        if guided is not None:
+            button=QToolButton(self);button.setDefaultAction(guided)
+            button.setObjectName('guidedHeaderButton');button.setToolButtonStyle(Qt.ToolButtonTextOnly);button.setAutoRaise(True)
+            button.setStyleSheet('''QToolButton {background:transparent;border:0;border-radius:0;padding:5px 10px;}
+                QToolButton:checked {background:rgba(100,125,220,65);color:#e0e7ff;}
+                QToolButton:hover {background:rgba(100,125,220,40);}''')
+            layout.addWidget(button,0,Qt.AlignVCenter);window.guided_header_button=button
         layout.addStretch(1)
         self.buttons={}
         for key,symbol,ru,en,callback in [('minimize','−','Свернуть','Minimize',window.showMinimized),('maximize','□','Развернуть / восстановить','Maximize / restore',self.toggle_maximized),('close','×','Закрыть','Close',window.close)]:
-            button=WindowButton(key,window);button.setObjectName('windowClose' if key=='close' else 'windowControl');button.setToolTip(window.trtext(ru,en));button.clicked.connect(callback);layout.addWidget(button,0,Qt.AlignVCenter);self.buttons[key]=button
+            button=WindowButton(key,window);button.setObjectName('windowClose' if key=='close' else 'windowControl');button.setToolTip(window.trtext(ru,en));button.setAccessibleName(button.toolTip());button.clicked.connect(callback);layout.addWidget(button,0,Qt.AlignVCenter);self.buttons[key]=button
         window.installEventFilter(self)
         self.edge_filter=WindowEdges(window);QApplication.instance().installEventFilter(self.edge_filter)
     def toggle_maximized(self):

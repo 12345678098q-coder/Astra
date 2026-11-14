@@ -4,15 +4,23 @@ from core.i18n import localize
 import json
 import uuid
 import numpy as np
-from PySide6.QtCore import Qt, QMimeData,QObject,QEvent,QPoint,QTimer
-from PySide6.QtGui import QDrag, QPainter, QPalette,QCursor
-from PySide6.QtWidgets import QListWidget, QMdiArea, QMenu, QInputDialog, QMessageBox, QSizeGrip, QMdiSubWindow, QStyle, QStyledItemDelegate,QApplication,QWidget
+from PySide6.QtCore import Qt, QMimeData,QObject,QEvent,QPoint,QTimer,QRectF
+from PySide6.QtGui import QDrag, QPainter, QPalette,QCursor,QPixmap
+from PySide6.QtWidgets import QListWidget, QMdiArea, QMenu, QInputDialog, QMessageBox, QSizeGrip, QMdiSubWindow, QStyle, QStyledItemDelegate,QApplication,QWidget,QStyleOptionViewItem,QLabel,QVBoxLayout
 from core.resources import heavy_job_running
 
 MIME='application/x-astra-checkpoint'
-SHORT={'Автовыравнивание фона':'BN','Automatic background balance':'BN','Auto background balance':'BN','rcastro: bxt':'BXT','rcastro: nxt':'NXT','rcastro: sxt':'SXT',
+SHORT={'NARROWBAND':'NBN','Автовыравнивание фона':'BN','Automatic background balance':'BN','Auto background balance':'BN','rcastro: bxt':'BXT','rcastro: nxt':'NXT','rcastro: sxt':'SXT',
        'graxpert: background-extraction':'GX-G','graxpert: denoising':'GX-N',
-       'graxpert: deconv-obj':'GX-O','graxpert: deconv-stellar':'GX-S','StarNet':'SN'}
+       'graxpert: deconv-obj':'GX-O','graxpert: deconv-stellar':'GX-S',
+       'GraXpert: stars + nebula':'GX-S+N','StarNet':'SN',
+       'Автокроп':'Crop','Auto crop':'Crop',
+       'Выравнивание каналов':'RGB Align','Channel alignment':'RGB Align',
+       'Поворот 90° влево':'Rot −90°','Rotate 90° left':'Rot −90°',
+       'Поворот 90° вправо':'Rot +90°','Rotate 90° right':'Rot +90°',
+       'Отражение по горизонтали':'Flip H','Flip horizontally':'Flip H',
+       'Отражение по вертикали':'Flip V','Flip vertically':'Flip V',
+       'edges':'EDGE','PAL-AI':'AI-P','HiPS-BG':'HiPS'}
 
 class CheckpointDropReceiver(QObject):
     """Accept copy drags over documents as well as empty MDI space."""
@@ -47,13 +55,84 @@ class CheckpointDelegate(QStyledItemDelegate):
         super().initStyleOption(option,index)
         option.state &= ~QStyle.State_HasFocus
 
+    def paint(self,painter,option,index):
+        opt=QStyleOptionViewItem(option)
+        self.initStyleOption(opt,index)
+        text=opt.text
+        number=index.data(Qt.UserRole)
+        token=f'{number:02d}' if isinstance(number,int) else ''
+        prefix,separator,label=text.partition(token+'  ') if token else ('','','')
+        if not separator:
+            super().paint(painter,option,index);return
+        style=opt.widget.style() if opt.widget else QApplication.style()
+        rect=style.subElementRect(QStyle.SE_ItemViewItemText,opt,opt.widget)
+        opt.text=''
+        style.drawControl(QStyle.CE_ItemViewItem,opt,painter,opt.widget)
+        painter.save()
+        painter.setClipRect(option.rect)
+        painter.setFont(opt.font)
+        fm=opt.fontMetrics
+        gap=max(4,round(fm.height()*.3))
+        x=rect.left()+gap
+        foreground=opt.palette.color(QPalette.HighlightedText if opt.state & QStyle.State_Selected else QPalette.Text)
+        painter.setPen(foreground)
+        if prefix:
+            width=fm.horizontalAdvance(prefix)
+            painter.drawText(x,rect.top(),width,rect.height(),Qt.AlignVCenter,prefix)
+            x+=width
+        width=fm.horizontalAdvance(token)+gap*2
+        height=min(rect.height()-2,fm.height()+gap)
+        badge=QRectF(x,rect.center().y()-height/2,width,height)
+        background=opt.palette.color(QPalette.Base)
+        background=background.lighter(170) if background.lightness()<128 else background.darker(115)
+        painter.setPen(Qt.NoPen);painter.setBrush(background)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.drawRoundedRect(badge,4,4)
+        painter.setPen(opt.palette.color(QPalette.Text))
+        painter.drawText(badge,Qt.AlignCenter,token)
+        x+=width+gap
+        painter.setPen(foreground)
+        available=max(0,rect.right()-x)
+        painter.drawText(x,rect.top(),available,rect.height(),Qt.AlignVCenter,fm.elidedText(label,Qt.ElideRight,available))
+        painter.restore()
+
 class CheckpointList(QListWidget):
     def __init__(self,owner):
         super().__init__(); self.owner=owner; self.document=None
         self.setItemDelegate(CheckpointDelegate(self))
         self.setDragEnabled(True); self.setContextMenuPolicy(Qt.CustomContextMenu)
         self.customContextMenuRequested.connect(self.menu)
+        self.copy_press = None
+        self.copy_origin = None
+        self.copy_preview = None
+
+    def clear_copy_preview(self):
+        if self.copy_preview is not None:
+            self.copy_preview.hide()
+            self.copy_preview.deleteLater()
+            self.copy_preview = None
+
+    def show_copy_preview(self, position):
+        if self.copy_preview is None:
+            preview = QWidget(self, Qt.ToolTip | Qt.WindowTransparentForInput)
+            preview.setAttribute(Qt.WA_ShowWithoutActivating)
+            preview.setWindowOpacity(0.72)
+            layout = QVBoxLayout(preview)
+            layout.setContentsMargins(4, 4, 4, 4)
+            picture = QLabel()
+            picture.setPixmap(self.document.grab().scaled(360, 240, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            layout.addWidget(picture)
+            badge = QLabel(self.owner.trtext('⧉  Копия слоя', '⧉  Copy layer'))
+            badge.setAlignment(Qt.AlignCenter)
+            layout.addWidget(badge)
+            preview.adjustSize()
+            self.copy_preview = preview
+        self.copy_preview.move(position + QPoint(16, 18))
+        self.copy_preview.show()
+
     def mousePressEvent(self,event):
+        self.clear_copy_preview()
+        self.copy_press = None
         item=self.itemAt(event.position().toPoint())
         if item is not None and event.button()==Qt.LeftButton:
             if event.modifiers() & Qt.ControlModifier:
@@ -66,6 +145,11 @@ class CheckpointList(QListWidget):
                 if self.document in selection:self.owner.history_go(self.document,item.data(Qt.UserRole))
                 refresh(self.owner);event.accept();return
             self.owner.checkpoint_selection={}
+            record=self.owner.documents.get(self.document)
+            if record is not None:
+                index=item.data(Qt.UserRole)
+                self.copy_press=record['history'].entries[index]
+                self.copy_origin=self.visualItemRect(item)
         if event.button()==Qt.RightButton:
             event.accept();return  # Keep cross-document Ctrl selection for the menu.
         super().mousePressEvent(event)
@@ -81,6 +165,43 @@ class CheckpointList(QListWidget):
                 for row in range(listing.count()):
                     entry=listing.item(row)
                     entry.setSelected(linked and entry.data(Qt.UserRole)==record['history'].index)
+    def mouseMoveEvent(self,event):
+        if self.copy_press is not None and event.buttons() & Qt.LeftButton:
+            if self.copy_origin.contains(event.position().toPoint()) or heavy_job_running(self.owner):
+                self.clear_copy_preview()
+            else:
+                self.show_copy_preview(event.globalPosition().toPoint())
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self,event):
+        if event.button()==Qt.LeftButton:
+            self.clear_copy_preview()
+        if event.button()!=Qt.LeftButton or self.copy_press is None:
+            super().mouseReleaseEvent(event)
+            return
+        entry,self.copy_press=self.copy_press,None
+        owner,source=self.owner,self.document
+        record=owner.documents.get(source)
+        if record is None:return
+        point=event.position().toPoint()
+        item=self.itemAt(point) if self.viewport().rect().contains(point) else None
+        if item is not None and self.visualItemRect(item).contains(point) and record['history'].entries[item.data(Qt.UserRole)] is entry:
+            super().mouseReleaseEvent(event)
+            return
+        event.accept()
+        if heavy_job_running(owner):return
+        position=owner.mdi.viewport().mapFromGlobal(event.globalPosition().toPoint())
+        def copy():
+            record=owner.documents.get(source)
+            if record is None:return
+            for index,candidate in enumerate(record['history'].entries):
+                if candidate is entry:
+                    owner.copy_checkpoint(source,index,position)
+                    break
+        QTimer.singleShot(0,owner,copy)
+
     def startDrag(self,actions):
         item=self.currentItem()
         if item is None:return
@@ -115,8 +236,10 @@ class CheckpointList(QListWidget):
         from core.checkpoint_links import selected,link_selected,unlink
         entry=w.documents[self.document]['history'].entries[index]
         choices=selected(w)
+        link_action=None
         if any(window is self.document and i==index for window,i,_ in choices):
             action=menu.addAction(w.trtext('Связать слои','Link layers'))
+            link_action=action
             action.setEnabled(len(choices)>1 and not heavy_job_running(w))
             def connect_layers():
                 try:link_selected(w)
@@ -128,8 +251,20 @@ class CheckpointList(QListWidget):
         menu.addSeparator()
         menu.addAction(w.trtext('Открыть копию','Open copy'),lambda:w.copy_checkpoint(self.document,index))
         delete=menu.addAction(w.trtext('Удалить этот и более новые снимки','Delete this and newer snapshots'),lambda:w.delete_checkpoints(self.document,index))
-        delete.setEnabled(index>0 and not heavy_job_running(w))
-        menu.exec(self.mapToGlobal(pos))
+        def refresh_actions():
+            busy=heavy_job_running(w)
+            delete.setEnabled(index>0 and not busy)
+            if link_action is not None:link_action.setEnabled(len(choices)>1 and not busy)
+        # A worker may finish inside QMenu's nested event loop. Keep actions
+        # current while it is open instead of freezing the busy state until
+        # the user closes and reopens the menu.
+        timer=QTimer(menu);timer.setInterval(100)
+        timer.timeout.connect(refresh_actions)
+        menu.aboutToShow.connect(refresh_actions)
+        refresh_actions();timer.start()
+        try:menu.exec(self.mapToGlobal(pos))
+        finally:
+            timer.stop();menu.deleteLater()
 
 class DocumentWindow(QMdiSubWindow):
     def closeEvent(self,event):
@@ -210,13 +345,35 @@ class DocumentWindow(QMdiSubWindow):
 class Workspace(QMdiArea):
     def __init__(self,owner):
         super().__init__(); self.owner=owner; self.setAcceptDrops(True)
+        from pathlib import Path
+        self.background_art=QPixmap(str(Path(__file__).resolve().parent.parent/'assets/workspace-abstract.png'))
         from core.window_snap import WindowSnap
         self.snap=WindowSnap(self)
         self.subWindowActivated.connect(self.highlight_active_window)
+    def paintEvent(self,event):
+        super().paintEvent(event)
+        if self.background_art.isNull():return
+        painter=QPainter(self.viewport())
+        painter.setRenderHint(QPainter.SmoothPixmapTransform)
+        painter.setOpacity(.75)
+        bounds=QRectF(self.viewport().rect())
+        source=QRectF(self.background_art.rect())
+        scale=max(bounds.width()/source.width(),bounds.height()/source.height())
+        width,height=bounds.width()/scale,bounds.height()/scale
+        source=QRectF((source.width()-width)/2,(source.height()-height)/2,width,height)
+        painter.drawPixmap(bounds,self.background_art,source)
     def resizeEvent(self,event):
         super().resizeEvent(event)
+        focus=getattr(self.owner,'guided_workspace',None)
+        if focus is not None and focus.enabled:focus.focus();return
         if hasattr(self,'snap'):self.snap.resize()
+    def tileSubWindows(self):
+        focus=getattr(self.owner,'guided_workspace',None)
+        if focus is not None and focus.enabled:focus.focus();return
+        super().tileSubWindows()
     def highlight_active_window(self,active):
+        focus=getattr(self.owner,'guided_workspace',None)
+        if focus is not None and focus.enabled:focus.focus(active)
         for window in self.subWindowList():
             selected=window is active
             if window.property('activeDocument')==selected:continue
@@ -301,7 +458,11 @@ class CheckpointMixin:
                 result[y:y+128]=block[...,0]*.2126+block[...,1]*.7152+block[...,2]*.0722
         except (MemoryError,ValueError) as error:
             QMessageBox.warning(self,'Astra',str(error));return
-        self.data=result;self.count=None;self.next_image_title=window.windowTitle()+' · L';self.showimage()
+        record=self.documents[window]
+        self.data=result;self.count=None;self.next_image_title=window.windowTitle()+' · L';created=self.showimage()
+        self.documents[created]['channel']='L'
+        if record.get('wcs_header') is not None:self.documents[created]['wcs_header']=record['wcs_header'].copy()
+        self.update_history(created)
     def copy_checkpoint(self,window,index,position=None):
         record=self.documents[window]
         try:data,count=record['history'].snapshot(index,record['data'],record['count'])
@@ -358,7 +519,7 @@ class CheckpointMixin:
         if window not in self.documents:return
         name,ok=QInputDialog.getText(self,self.trtext('Переименовать изображение','Rename image'),self.trtext('Название','Name'),text=window.windowTitle())
         if ok and name.strip():window.setWindowTitle(self.unique_image_title(name.strip(),window));self.activate_document(window)
-    def split_rgb(self,window=None):
+    def split_rgb(self,window=None,channel=None):
         window=window or self.mdi.activeSubWindow()
         if window not in self.documents:return
         record=self.documents[window]; data=record['data']; name=window.windowTitle()
@@ -372,9 +533,14 @@ class CheckpointMixin:
         display={key:record.get(key,default) for key,default in
                  (('stretch',False),('strength',20),('auto_stretch',False))}
         display['transfer']=transfer if display['stretch'] else None
-        for index,channel in enumerate('RGB'):
-            self.data=data[...,index].copy(); self.count=None; self.next_image_title=name+' · '+channel
+        if channel is not None and channel not in ('R','G','B'):
+            raise ValueError(localize('Ожидается канал R, G или B'))
+        channels='RGB' if channel is None else channel
+        for selected in channels:
+            index='RGB'.index(selected)
+            self.data=data[...,index].copy(); self.count=None; self.next_image_title=name+' · '+selected
             created=self.showimage(tile=False,display=display)
-            self.documents[created]['channel']=channel
+            self.documents[created]['channel']=selected
+            if record.get('wcs_header') is not None:self.documents[created]['wcs_header']=record['wcs_header'].copy()
             self.update_history(created)
         self.mdi.tileSubWindows()

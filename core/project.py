@@ -92,6 +92,7 @@ def save_archive(path,manifest,documents,progress=lambda text:None):
                     for field in ('token','link_id'):
                         if entry.get(field):state[field]=entry[field]
                     if entry.get('link_number'):state['link_number']=entry['link_number']
+                    if entry.get('wcs'):state['wcs']=entry['wcs']
                     for key,array in [('path',document['data']),('count_path',document['count'])]:
                         source=entry[key];member=f'images/{number}/{index}/{key}.npy'
                         if source is not None:archive.write(source,member);state[key]=member
@@ -144,6 +145,9 @@ def load_archive(path,progress=lambda text:None):
                         number=state['link_number']
                         if type(number) is not int or not 1<=number<=1000000:raise ValueError(localize('Некорректный номер связи.'))
                         entry['link_number']=number
+                    if state.get('wcs') is not None:
+                        if not isinstance(state['wcs'],str):raise ValueError(localize('Некорректный заголовок WCS.'))
+                        entry['wcs']=state['wcs']
                     for key in ('path','count_path'):
                         member=state[key];entry[key]=None
                         if member is None:

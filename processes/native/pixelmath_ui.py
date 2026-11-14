@@ -2,6 +2,7 @@ from core.responsive import set_em_size
 from core.i18n import localize
 import json
 import numpy as np
+from core.image_selector import ImageSelector
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import *
 from .ui import BasePanel
@@ -15,12 +16,12 @@ class PixelMathPanel(BasePanel):
   for key,label,default in [('formula','RGB/K',''),('green','G',''),('blue','B',''),('alpha','A','')]:
    field=self.text(key,label,label,default);field.installEventFilter(self);set_em_size(field,'setMinimumWidth',5.0)
   self.destination=QComboBox();self.destination.addItem(self.tr('Создать новый кадр','Create new image'),'new');self.destination.addItem(self.tr('Заменить выбранный кадр','Replace selected image'),'current');self.destination.setCurrentIndex(max(0,self.destination.findData(self.saved.get('destination','new'))));self.form.addRow(self.tr('Результат','Destination'),self.destination);self.destination.currentIndexChanged.connect(self.save);self.destination.currentIndexChanged.connect(self.sync)
-  self.target_box=QComboBox();self.form.addRow(self.tr('Кадр для замены','Replacement target'),self.target_box)
+  self.target_box=ImageSelector(self.refresh);self.form.addRow(self.tr('Кадр для замены','Replacement target'),self.target_box)
   self.space=QComboBox()
   for ru,en,key in [('Авто (по формуле)','Auto (from expression)','same'),('RGB','RGB','rgb'),('Моно','Mono','mono')]:self.space.addItem(self.tr(ru,en),key)
   self.space.setCurrentIndex(max(0,self.space.findData(self.saved.get('space','same'))));self.form.addRow(self.tr('Пространство','Color space'),self.space);self.space.currentIndexChanged.connect(self.save)
   self.text('name','Название результата','Result name','PixelMath')
-  self.sources=QComboBox();self.form.addRow(self.tr('Изображение в формулу','Image for expression'),self.sources)
+  self.sources=ImageSelector(self.refresh);self.form.addRow(self.tr('Изображение в формулу','Image for expression'),self.sources)
   insert=QPushButton(self.tr('Вставить имя','Insert name'));insert.clicked.connect(self.insert);self.form.addRow(insert)
   self.button('Обновить имена изображений','Refresh image names',self.refresh)
   self.note('Формулы используют имена изображений из списка. Пример: nebula + stars или nebula.R. Пробелы и знаки в имени заменяются на _, расширение убирается. При общей формуле используется RGB/K; при раздельных - R, G и B.','Use image names from the list, e.g. nebula + stars or nebula.R. Spaces and punctuation become _, extensions are removed. Single mode uses RGB/K; separate mode uses R, G and B.')
@@ -84,4 +85,5 @@ class PixelMathPanel(BasePanel):
   launch(self.window,'PixelMath',lambda job:evaluate_expressions(images,settings,shape,job.isInterruptionRequested,job.progress.emit),done,estimated)
  def show_preview(self,result,name):
   from core.preview_window import show_preview
-  self.temporary_preview=show_preview(self.window,result,name,True)
+  self.temporary_preview=show_preview(self.window,result,name,True,inherit_source=False)
+  self.temporary_preview.tool_owner=self

@@ -39,5 +39,6 @@ class OxygenPanel(BasePanel):
             if apply:self.clear_preview();self.window.apply_image_result(source,result,'OIII-RGB')
             else:
                 from core.preview_window import show_preview
-                self.temporary_preview=show_preview(self.window,result,source.windowTitle(),False,source=source,display_range=(0,scale))
+                self.temporary_preview=show_preview(self.window,result,source.windowTitle(),source=source)
+                self.temporary_preview.tool_owner=self
         launch(self.window,self.tr('Усиление кислорода','Oxygen enhancement'),work,done,data.size*16+32*1024**2)

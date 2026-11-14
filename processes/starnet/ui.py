@@ -2,6 +2,7 @@ from core.tool_logging import image_info, parameters
 from core.responsive import fit_screen
 from core.i18n import localize
 import tempfile
+import hashlib
 from pathlib import Path
 import numpy as np
 from PySide6.QtCore import QProcess
@@ -23,6 +24,22 @@ class StarNetProcessMixin:
         form=OptionForm(self,'starnet');layout.addWidget(form)
         license_button=QPushButton(self.trtext('Лицензия StarNet','StarNet license'));layout.addWidget(license_button)
         accept=QCheckBox(self.trtext('Принимаю лицензию StarNet','I accept the StarNet license'));accept.setObjectName('starnet_license');layout.addWidget(accept)
+        def license_display(text):
+            summary=self.trtext(
+                'Пояснение условий StarNet (неофициальное, не заменяет полный оригинал ниже).\n\n'
+                'StarNet бесплатен для обработки астрофотографий, включая коммерческую обработку. Права на ваши изображения остаются у вас; результаты можно публиковать и продавать, указание авторства не требуется.\n\n'
+                'Astra запускает отдельную официальную CLI-программу. Загрузка и обновления выполняются с официального сервера. Распространять копии программы и моделей без письменного разрешения автора нельзя.\n\n'
+                'Без письменного разрешения нельзя использовать программу, модели и результаты (включая изменённые) для обучения ИИ либо разработки, проверки и улучшения других программ и моделей. Разрешённая интеграция через CLI является исключением. Нельзя отдельно извлекать и использовать веса или обходить штатные интерфейсы.\n\n'
+                'Программа предоставляется без гарантий; сохраняйте исходники и проверяйте результаты. Лицензии сторонних компонентов, ранее предоставленные права и обязательные права по закону сохраняются. После прекращения лицензии ограничения на использование результатов продолжают действовать. Новые условия не заменяют задним числом условия старых копий.\n\nПолный оригинал соглашения:\n\n',
+                'Read the full StarNet license agreement below.\n\n')
+            return summary+text
+        def license_hash():
+            try:return hashlib.sha256(read_license()[1].encode('utf-8')).hexdigest()
+            except (OSError,ValueError):return None
+        def remember_acceptance(checked):
+            digest=license_hash()
+            if digest:self.settings.setValue('starnet/license_accepted/'+digest,checked)
+        accept.toggled.connect(remember_acceptance)
         def read_license():
             exe=starnet.executable()
             if exe is None:raise ValueError(localize('StarNet не установлен. Установите его через обновления инструментов.'))
@@ -31,7 +48,7 @@ class StarNetProcessMixin:
             try:_,text=read_license()
             except (OSError,ValueError) as error:QMessageBox.warning(page,'StarNet',str(error));return
             dialog=QDialog(self);dialog.setWindowTitle(localize('StarNet: лицензия'));fit_screen(dialog,0.469,0.444)
-            box=QVBoxLayout(dialog);content=QPlainTextEdit();content.setReadOnly(True);content.setPlainText(text);box.addWidget(content);dialog.exec()
+            box=QVBoxLayout(dialog);content=QPlainTextEdit();content.setReadOnly(True);content.setPlainText(license_display(text));box.addWidget(content);dialog.exec()
         license_button.clicked.connect(license_dialog)
         buttons=QHBoxLayout();reset=QPushButton(self.trtext('По умолчанию','Defaults'));reset.clicked.connect(form.reset);buttons.addWidget(reset)
         run=QPushButton(self.trtext('Применить','Apply'));run.setObjectName('starnet_run');run.setEnabled(False);buttons.addWidget(run);layout.addLayout(buttons)
@@ -45,13 +62,15 @@ class StarNetProcessMixin:
                 install_status.setText(self.trtext('StarNet установлен. Перед обработкой прочитайте и примите лицензию.','StarNet is installed. Read and accept its license before processing.') if present else self.trtext('Загрузите StarNet с официального сервера прямо из этого окна. Программа и модель устанавливаются в папку Astra.','Download StarNet directly from its official server using this panel. The program and model install into the Astra folder.'))
                 install_button.setText(self.trtext('Обновить StarNet','Update StarNet') if present else self.trtext('Установить StarNet','Install StarNet'))
                 install_button.setEnabled(True);accept.setEnabled(present);license_button.setEnabled(present)
+                digest=license_hash() if present else None
+                accept.setChecked(bool(digest and self.settings.value('starnet/license_accepted/'+digest,False,type=bool)))
                 run.setEnabled(present and accept.isChecked());preview_button.setEnabled(present and accept.isChecked())
             except RuntimeError:pass  # The tool panel may have been closed during download.
         def install_starnet():
             job=getattr(self,'tool_update_job',None)
             if heavy_job_running(self) or (job is not None and job.isRunning()):
                 QMessageBox.information(page,'StarNet',self.trtext('Дождитесь завершения текущей обработки или обновления.','Wait for the current operation or update to finish.'));return
-            accept.setChecked(False);install_button.setEnabled(False)
+            install_button.setEnabled(False)
             install_status.setText(self.trtext('Загрузка StarNet с официального сервера. Это может занять несколько минут.','Downloading StarNet from the official server. This may take a few minutes.'))
             self.start_tool_updates([('starnet',True,'')])
             job=getattr(self,'tool_update_job',None)
@@ -104,7 +123,7 @@ class StarNetProcessMixin:
                 if result.shape!=state['original'].shape or (stars_data is not None and stars_data.shape!=result.shape):raise ValueError(self.trtext('StarNet вернул изображение другого размера или числа каналов.','StarNet returned incompatible dimensions or channels.'))
                 if state['preview']:
                     from core.preview_window import show_preview
-                    show_preview(self,result,source.windowTitle()+' · StarNet',True,source=source)
+                    show_preview(self,result,source.windowTitle()+' · StarNet',source=source)
                 else:
                     dialog=getattr(self,'temporary_preview',None)
                     if dialog is not None:dialog.close()

@@ -50,20 +50,28 @@ class ToolPanel(QFrame):
         if 'graxpert:background-extraction' in self.entries:
             from .graxpert_background import GraXpertBackgroundPanel
             page=self.entries['graxpert:background-extraction'][0]
-            page.findChild(GraXpertBackgroundPanel).sync(self.pages.currentWidget() is page and self.window.tools_dock.isVisible())
+            page.findChild(GraXpertBackgroundPanel).sync(self.pages.currentWidget() is page and self.isVisible())
         if hasattr(self,'crop_panel'):
-            self.crop_panel.sync('crop' in self.entries and self.pages.currentWidget() is self.entries['crop'][0])
+            visible = not self.property('guidedEmbedded') or self.isVisible()
+            self.crop_panel.sync('crop' in self.entries and self.pages.currentWidget() is self.entries['crop'][0] and visible)
         for key in ('native:heal','native:clone'):
             if key in self.entries:
                 from .retouch.ui import RetouchPanel
                 panel=self.entries[key][0].findChild(RetouchPanel)
-                panel.sync(self.pages.currentWidget() is self.entries[key][0] and self.window.tools_dock.isVisible())
+                panel.sync(self.pages.currentWidget() is self.entries[key][0] and self.isVisible())
         if 'native:defects' in self.entries:
             from .native.ui import ProcessingPanel
             page=self.entries['native:defects'][0]
-            page.findChild(ProcessingPanel).sync_selection(self.pages.currentWidget() is page and self.window.tools_dock.isVisible())
+            page.findChild(ProcessingPanel).sync_selection(self.pages.currentWidget() is page and self.isVisible())
 
     def open_tool(self,key,title,short,callback=None):
+        if key=='native:signal_booster':
+            QMessageBox.information(self,'Signal Booster',localize('Signal Booster перенесён в отдельную программу: G:\\SignalBooster\\start.bat', 'Signal Booster is now a standalone application: G:\\SignalBooster\\start.bat'))
+            return
+        if key=='native:oxygen':
+            key='native:narrowband'
+            title=self.window.trtext('Нормализация узкополосного RGB','Narrowband RGB normalization')
+            short='NBN';callback=None
         if key not in self.entries:
             page=QWidget(); layout=QVBoxLayout(page)
             if key.startswith('native:'):
@@ -73,15 +81,17 @@ class ToolPanel(QFrame):
                 code=key.split(':')[1]
                 from .native.advanced_ui import AdvancedPanel, TITLES
                 from .native.sequence_ui import SequencePanel
+                from .native.star_alignment_ui import StarAlignmentPanel
                 from .native.edge_ui import EdgePanel
                 from .palettes.ui import PalettePanel
-                from .palettes.oxygen_ui import OxygenPanel
                 from .palettes.ai_ui import PaletteAI
-                from .native.signal_booster_ui import SignalBoosterPanel
                 from .retouch.ui import RetouchPanel
                 from .reference_background.ui import ReferenceBackgroundPanel
-                native=SignalBoosterPanel(self.window) if code=='signal_booster' else OxygenPanel(self.window) if code=='oxygen' else PaletteAI(self.window) if code=='palette_ai' else ReferenceBackgroundPanel(self.window) if code=='reference_background' else RetouchPanel(self.window,code) if code in ('heal','clone') else PalettePanel(self.window) if code=='palettes' else EdgePanel(self.window) if code=='edges' else SequencePanel(self.window) if code=='sequence' else AdvancedPanel(self.window,code) if code in TITLES else ProcessingPanel(self.window,code) if code in ('histogram','color','defects') else {'motion':MotionPanel,'mask':MaskPanel,'pixelmath':PixelMathPanel,'analysis':AnalysisPanel,'batch':BatchPanel}[code](self.window)
+                native=PaletteAI(self.window) if code=='palette_ai' else ReferenceBackgroundPanel(self.window) if code=='reference_background' else RetouchPanel(self.window,code) if code in ('heal','clone') else PalettePanel(self.window) if code=='palettes' else EdgePanel(self.window) if code=='edges' else SequencePanel(self.window) if code=='sequence' else AdvancedPanel(self.window,code) if code in TITLES else ProcessingPanel(self.window,code) if code in ('histogram','color','defects') else {'motion':MotionPanel,'mask':MaskPanel,'pixelmath':PixelMathPanel,'analysis':AnalysisPanel,'batch':BatchPanel,'star_alignment':StarAlignmentPanel}[code](self.window)
                 layout.addWidget(native)
+            elif key.startswith('testing:'):
+                from .testing.ui import TestingPanel
+                layout.addWidget(TestingPanel(self.window, key.split(':', 1)[1]))
             elif key=='graxpert:background-extraction':
                 from .graxpert_background import GraXpertBackgroundPanel
                 panel=GraXpertBackgroundPanel(self.window);self.forms[key]=panel.options;layout.addWidget(panel)
@@ -94,6 +104,16 @@ class ToolPanel(QFrame):
             elif key=='stretch':
                 enabled=QPushButton(self.window.trtext('Предрастяжка просмотра','Preview stretch'));enabled.setCheckable(True); enabled.setChecked(self.window.stretch.isChecked()); layout.addWidget(enabled)
                 auto=QPushButton(self.window.trtext('Авторастяжка: вкл / выкл','Auto stretch: on / off'));auto.setCheckable(True);auto.setChecked(self.window.documents.get(self.window.mdi.activeSubWindow(),{}).get('auto_stretch',True));layout.addWidget(auto);self.auto_stretch_control=auto
+                fixed=QPushButton(self.window.trtext('Фиксировать растяжку','Lock stretch'))
+                fixed.setCheckable(True)
+                fixed.setToolTip(self.window.trtext('Сохраняет текущую растяжку при переключении шагов. Выключите и снова включите предрастяжку для пересчёта.',
+                                                   'Keeps the current stretch across history steps. Turn preview stretch off and back on to recalculate.'))
+                layout.addWidget(fixed)
+                self.fixed_stretch_control=fixed
+                fixed.setChecked(self.window.documents.get(self.window.mdi.activeSubWindow(),{}).get('preview_fixed',False))
+                self.update_fixed_stretch_label(fixed.isChecked())
+                fixed.toggled.connect(self.window.set_preview_fixed)
+                fixed.toggled.connect(self.update_fixed_stretch_label)
                 target=QDoubleSpinBox();target.setRange(.05,.5);target.setSingleStep(.01);target.setValue(float(self.window.settings.value('preview_target',.2)));layout.addWidget(QLabel(self.window.trtext('Целевая яркость фона','Target background brightness')));layout.addWidget(target)
                 slider=QSlider(Qt.Horizontal); slider.setRange(0,1000); slider.setValue(self.window.stretch_strength)
                 spin=QSpinBox(); spin.setRange(0,1000); spin.setValue(slider.value()); slider.valueChanged.connect(spin.setValue); spin.valueChanged.connect(slider.setValue)
@@ -108,7 +128,9 @@ class ToolPanel(QFrame):
                         from core.preview_levels import reset_checkpoint_display
                         reset_checkpoint_display(record)
                         record['auto_stretch']=auto.isChecked()
+                        if not auto.isChecked():record.pop('fixed_preview_transfer',None)
                     self.window.settings.setValue('preview_auto',auto.isChecked());self.window.settings.setValue('preview_target',target.value());target.setEnabled(auto.isChecked());self.window.render()
+                    fixed.setEnabled(record is not None and auto.isChecked())
                 auto.toggled.connect(automatic);target.valueChanged.connect(automatic);target.setEnabled(auto.isChecked())
                 auto.setToolTip(localize('Подбирать силу предрастяжки по распределению яркости текущего фото. Исходные пиксели не изменяются.'))
                 target.setToolTip(localize('Желаемая яркость фоновой части изображения на экране, от 0 до 1.'))
@@ -126,10 +148,24 @@ class ToolPanel(QFrame):
                 run=QPushButton(self.window.trtext('Применить','Apply'))
                 def apply(checked=False,preview=False):
                     try:
+                        from .quick_deconvolution import KEYS,run as run_quick
+                        if self.property('guidedEmbedded') and key in KEYS:
+                            run_quick(self.window,key);return
                         options=form.values();tool,operation=key.split(':',1)
                         if tool=='local':
                             from .background import run_background
-                            run_background(self.window,options,preview=preview)
+                            job = run_background(self.window, options, preview=preview)
+                            if job is not None:
+                                run.setEnabled(False)
+                                preview_button.setEnabled(False)
+
+                                def ready():
+                                    entry = self.entries.get(key)
+                                    if entry is not None and entry[0].isAncestorOf(run):
+                                        run.setEnabled(True)
+                                        preview_button.setEnabled(True)
+
+                                job.finished.connect(ready)
                         else:self.window.run_external(tool,operation,options,preview=preview)
                     except ValueError as error:QMessageBox.warning(self,'Astra',str(error))
                 preview_button=QPushButton(self.window.trtext('Предпросмотр','Preview'));preview_button.clicked.connect(lambda:apply(preview=True));layout.addWidget(preview_button)
@@ -173,9 +209,11 @@ class ToolPanel(QFrame):
                         item=inner.itemAt(row,QFormLayout.LabelRole)
                         old=item.widget() if item else None
                         if isinstance(old,QLabel) and not isinstance(old,FormCaption):
+                            hidden=old.isHidden()
                             caption=FormCaption(old.text());caption.setToolTip(old.toolTip())
                             caption.setBuddy(old.buddy())
                             inner.replaceWidget(old,caption)
+                            caption.setVisible(not hidden)
                             old.hide();old.deleteLater()
             layout.setContentsMargins(0,8,0,0)
             for label in page.findChildren(QLabel):
@@ -184,6 +222,7 @@ class ToolPanel(QFrame):
                 if field.property('astra_keep_width'):continue
                 field.setMinimumWidth(0);field.setMaximumWidth(16777215);field.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Fixed)
             layout.setSizeConstraint(QLayout.SetNoConstraint)
+            page.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Preferred)
             scroll=QScrollArea();scroll.setWidgetResizable(True);scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff);scroll.setFrameShape(QFrame.NoFrame);scroll.setWidget(page)
             from .rail_button import ToolRailButton
             button=ToolRailButton(short,self,key);button.setObjectName('toolRailButton');button.setCheckable(True);self.buttons.addButton(button); button.setToolTip(title); set_em_size(button,'setFixedWidth',3.4375);button.clicked.connect(lambda:self.pages.setCurrentWidget(scroll));self.rail.insertWidget(self.rail.count()-1,button)
@@ -202,12 +241,17 @@ class ToolPanel(QFrame):
             button.clicked.disconnect();button.clicked.connect(lambda:self.pages.setCurrentWidget(container))
             self.entries[key]=(container,button)
             self.restore_rail_order()
-        self.pages.setCurrentWidget(self.entries[key][0]); self.entries[key][1].setChecked(True); self.window.tools_dock.show(); self.sync_crop()
+        self.pages.setCurrentWidget(self.entries[key][0]); self.entries[key][1].setChecked(True)
+        from core.tool_modes import configure_page,mode_for
+        configure_page(self.entries[key][0],key,mode_for(self.window))
+        if not self.property('guidedEmbedded'):self.window.tools_dock.show()
+        self.sync_crop()
         self.rail_scroll.ensureWidgetVisible(self.entries[key][1])
         if key in self.pinned_tools():self.pin_tool(key,True)
         from core.interface_settings import adjust_widgets
         adjust_widgets(self.window)
         self.fit_action_width()
+        if self.property('guidedEmbedded'):self.window.guided_panel.adopt_tool(key)
 
     def saved_rail_order(self):
         try:
@@ -240,6 +284,9 @@ class ToolPanel(QFrame):
         from .action_footer import AdaptiveFooter
         footers=[footer for page,button in self.entries.values() for footer in page.findChildren(AdaptiveFooter)]
         minimum=max([footer.minimumSizeHint().width() for footer in footers] or [180])
+        if self.property('guidedEmbedded'):
+            self.setMinimumWidth(minimum)
+            return
         root=self.layout();m=root.contentsMargins();c=self.content_layout.contentsMargins();r=self.rail.contentsMargins();frame=self.contentsMargins()
         rail_width=max([button.width() for page,button in self.entries.values()] or [55])
         minimum+=m.left()+m.right()+c.left()+c.right()+r.left()+r.right()+rail_width+1+max(0,root.spacing())*2+frame.left()+frame.right()
@@ -248,6 +295,11 @@ class ToolPanel(QFrame):
         from core.responsive import em
         self.window.mdi.setMinimumWidth(em(self,12))
         if dock.width()<minimum:self.window.resizeDocks([dock],[minimum],Qt.Horizontal)
+
+    def update_fixed_stretch_label(self, locked):
+        text = self.window.trtext('Растяжка зафиксирована', 'Stretch locked') if locked else self.window.trtext(
+            'Фиксировать растяжку', 'Lock stretch')
+        self.fixed_stretch_control.setText(text)
 
     def sync_target(self):
         self.sync_crop()
@@ -260,8 +312,15 @@ class ToolPanel(QFrame):
         if not hasattr(self,'stretch_controls'):return
         enabled,slider,spin=self.stretch_controls
         if hasattr(self,'auto_stretch_control'):
-            auto=self.auto_stretch_control;auto.blockSignals(True);auto.setChecked(self.window.documents.get(self.window.mdi.activeSubWindow(),{}).get('auto_stretch',True));auto.blockSignals(False)
+            record=self.window.documents.get(self.window.mdi.activeSubWindow(),{})
+            auto=self.auto_stretch_control;auto.blockSignals(True);auto.setChecked(record.get('auto_stretch',True));auto.blockSignals(False)
             self.auto_stretch_target.setEnabled(auto.isChecked())
+            fixed=self.fixed_stretch_control
+            fixed.blockSignals(True)
+            fixed.setChecked(record.get('preview_fixed',False))
+            fixed.setEnabled(bool(record) and auto.isChecked())
+            fixed.blockSignals(False)
+            self.update_fixed_stretch_label(fixed.isChecked())
         for widget in (enabled,slider,spin):widget.blockSignals(True)
         enabled.setChecked(self.window.stretch.isChecked()); slider.setValue(self.window.stretch_strength); spin.setValue(self.window.stretch_strength)
         for widget in (enabled,slider,spin):widget.blockSignals(False)
@@ -277,11 +336,13 @@ class ToolPanel(QFrame):
 
     def pinned_tools(self):
         try:
-            keys=json.loads(self.window.settings.value('tools/pinned','[]'))
-            return list(dict.fromkeys(key for key in keys if isinstance(key,str))) if isinstance(keys,list) else []
+            keys=self.window.settings.value('tools/pinned','["crop"]')
+            if isinstance(keys,str):keys=json.loads(keys)
+            return list(dict.fromkeys('native:narrowband' if key=='native:oxygen' else key for key in keys if isinstance(key,str))) if isinstance(keys,list) else []
         except (ValueError,TypeError):return []
 
     def pin_tool(self,key,checked):
+        if key=='native:oxygen':key='native:narrowband'
         keys=self.pinned_tools()
         if checked and key not in keys:keys.append(key)
         elif not checked and key in keys:keys.remove(key)
@@ -300,7 +361,7 @@ class ToolPanel(QFrame):
         if key=='graxpert:background-extraction':
             from .graxpert_background import GraXpertBackgroundPanel
             self.entries[key][0].findChild(GraXpertBackgroundPanel).clear_preview()
-        if key.startswith('native:'):
+        if key.startswith(('native:', 'testing:')):
             from core.resources import heavy_job_running
             if heavy_job_running(self.window):
                 QMessageBox.information(self,'Astra',self.window.trtext('Отмените обработку или дождитесь завершения.','Cancel processing or wait for completion.'));return
@@ -326,7 +387,7 @@ class ToolPanel(QFrame):
         self.buttons.removeButton(button);self.rail.removeWidget(button);button.deleteLater()
         self.pages.removeWidget(page);page.deleteLater();self.forms.pop(key,None)
         if key=='stretch' and hasattr(self,'stretch_controls'):
-            del self.stretch_controls;del self.auto_stretch_control;del self.auto_stretch_target
+            del self.stretch_controls;del self.auto_stretch_control;del self.auto_stretch_target;del self.fixed_stretch_control
         if selected:
             if self.entries:
                 next_page,next_button=next(reversed(self.entries.values()))

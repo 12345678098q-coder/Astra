@@ -22,7 +22,7 @@ class MotionPanel(BasePanel):
         self.button('Оценить по звёздам','Estimate from stars',self.estimate)
         self.status=self.note('','')
         self.note('Для небольшого прямолинейного смаза до 20 пикселей. Предпочтительно линейное моно или уже дебаеризованное RGB. Длинные дуги, вращение поля и оптические дефекты не поддерживаются. Автооценка предполагает круглые звёзды до смаза и может ошибаться при аберрациях.','For short straight motion up to 20 pixels. Prefer linear mono or debayered RGB. Long arcs, field rotation and optical defects are unsupported. Estimation assumes initially round stars and can misinterpret aberrations.')
-        self.note('Данные не растягиваются и не обрезаются по яркости; возможны отрицательные значения и ореолы. Проверьте звёзды и фон в масштабе 1:1. Активная маска учитывается. Не применяйте повторно после коррекции кадров в сложении.','Data is neither stretched nor brightness-clipped; negative values and ringing are possible. Inspect stars and background at 1:1. The active mask is respected. Avoid repeating correction after preprocessing lights in stacking.')
+        self.note('Данные не растягиваются и не обрезаются по яркости; возможны отрицательные значения и ореолы. Активная маска учитывается. Не применяйте повторно после коррекции кадров в сложении.','Data is neither stretched nor brightness-clipped; negative values and ringing are possible. The active mask is respected. Avoid repeating correction after preprocessing lights in stacking.')
         self.button('Предпросмотр','Preview',lambda:self.execute(False))
         self.button('Сброс','Reset',self.reset)
         self.button('Отмена','Cancel',self.cancel)

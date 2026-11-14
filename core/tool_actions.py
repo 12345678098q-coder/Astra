@@ -74,10 +74,11 @@ class ToolActions(QObject):
             self.before_mask=self.owner.documents[target].get('mask')
             self.button.click()
             return
+        restore_source = self.running
         self.pending = []
         self.running = False
         self.source = None
-        if self.original_source in self.owner.documents:
+        if restore_source and self.original_source in self.owner.documents:
             self.owner.mdi.setActiveSubWindow(self.original_source)
 
     def eventFilter(self, watched, event):

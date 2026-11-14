@@ -16,11 +16,20 @@ class PreviewWindow(QDialog):
         was_visible=self.isVisible()
         self.data=data;self.stretched=stretched;self.display_range=display_range;self.display_stretch=display_stretch;self.setWindowTitle(self.owner.trtext('Временный предпросмотр · ','Temporary preview · ')+title)
         source=source or self.owner.mdi.activeSubWindow()
+        self.source_window=source
         record=self.owner.documents.get(source,{})
         viewport=record.get('image')
         anchor=source.mapToGlobal(QPoint(0,0)) if source else self.owner.mapToGlobal(QPoint(0,0))
         screen=QApplication.screenAt(anchor) or self.owner.screen()
         available=screen.availableGeometry()
+        # A floating preview must leave the processing controls accessible,
+        # even when the source window is tiled near the tools dock.
+        if viewport is not None:
+            workspace=self.owner.mdi.viewport()
+            workspace_rect=workspace.rect().translated(workspace.mapToGlobal(QPoint(0,0)))
+            workspace_rect=available.intersected(workspace_rect)
+            if workspace_rect.width()>=200 and workspace_rect.height()>=160:
+                available=workspace_rect
         height,width=data.shape[:2]
         max_width=min(viewport.width() if viewport else round(available.width()*.75),round(available.width()*.96))
         max_height=min(viewport.height() if viewport else round(available.height()*.75),round(available.height()*.9))
@@ -34,28 +43,42 @@ class PreviewWindow(QDialog):
         y=max(available.top(),min(anchor.y(),available.bottom()-frame.height()+1))
         self.move(QPoint(x,y)+decoration);self.raise_()
         if not was_visible:self.activateWindow()
-    def render(self):
+    def render(self,source_size=None):
         source=self.data
         if source is None:return
         # Bound display allocation. Numerical preview data retain original precision.
-        step=max(1,int(np.ceil(max(source.shape[:2])/2400)));sample=source[::step,::step];finite=sample[np.isfinite(sample)]
-        if not finite.size:return
-        lo,hi=(self.display_stretch[:2] if self.display_stretch is not None else np.percentile(finite,[.2,99.8])) if self.stretched else (self.display_range or (0.,1.))
-        a=np.clip((sample-lo)/max(float(hi-lo),1e-15),0,1)
+        step=1 if getattr(self,'full_resolution',False) else max(1,int(np.ceil(max(source.shape[:2])/2400)))
+        sample=source[::step,::step]
+        strength=0
         if self.stretched:
             from processes.stretch import automatic_strength
+            finite=sample[np.isfinite(sample)]
+            if not finite.size:finite=np.array([0.,1.])
+            lo,hi=self.display_stretch[:2] if self.display_stretch is not None else np.percentile(finite,[.2,99.8])
             strength=self.display_stretch[2] if self.display_stretch is not None else automatic_strength(finite,lo,hi)
-            if strength:a=np.arcsinh(strength*a)/np.arcsinh(strength)
-        if a.ndim==2:a=np.repeat(a[...,None],3,axis=-1)
-        rgb=(np.nan_to_num(a[...,:3])*255).astype(np.uint8)
+        else:
+            lo,hi=self.display_range or (0.,1.)
+        rgb=np.empty((*sample.shape[:2],3),dtype=np.uint8)
+        for top in range(0,sample.shape[0],128):
+            block=np.clip((sample[top:top+128]-lo)/max(float(hi-lo),1e-12),0,1)
+            if strength:block=np.arcsinh(strength*block)/np.arcsinh(strength)
+            if block.ndim==2:block=block[...,None]
+            rgb[top:top+128]=np.nan_to_num(block[...,:3])*255
         self.image.stretched=self.stretched
-        self.image.setPixmap(QPixmap.fromImage(QImage(rgb.data,rgb.shape[1],rgb.shape[0],rgb.strides[0],QImage.Format_RGB888).copy()))
+        self.image.setPixmap(QPixmap.fromImage(QImage(rgb.data,rgb.shape[1],rgb.shape[0],rgb.strides[0],QImage.Format_RGB888).copy()),source_size)
 
-def show_preview(owner,data,title,stretched=False,source=None,display_range=None,display_stretch=None):
-    if stretched and display_stretch is None:
-        from .preview_levels import checkpoint_transfer
-        record=owner.documents.get(source or owner.mdi.activeSubWindow(),{})
-        display_stretch=checkpoint_transfer(record)
+def show_preview(owner,data,title,stretched=None,source=None,display_range=None,display_stretch=None,*,inherit_source=True,full_resolution=False):
+    from .preview_levels import source_display
+    record=owner.documents.get(source or owner.mdi.activeSubWindow(),{}) if inherit_source else {}
+    if stretched is None:stretched=record.get('stretch',True)
+    if display_range is None or (stretched and display_stretch is None):
+        settings=getattr(owner,'settings',None)
+        target=float(settings.value('preview_target',.2)) if settings is not None else .2
+        original_range,original_transfer=source_display(record,target)
+        if display_range is None:display_range=original_range
+        if stretched and display_stretch is None:display_stretch=original_transfer
     dialog=getattr(owner,'temporary_preview',None)
     if dialog is None:dialog=PreviewWindow(owner);owner.temporary_preview=dialog
+    dialog.tool_owner=None
+    dialog.full_resolution=full_resolution
     dialog.display(data,title,stretched,source,display_range,display_stretch);return dialog

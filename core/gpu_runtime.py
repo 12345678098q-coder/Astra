@@ -7,6 +7,10 @@ from pathlib import Path
 def runtime_path():
     return Path(__file__).resolve().parent.parent/'optional/cuda/site-packages'
 
+def is_installed():
+    """Check the optional module without loading CUDA into the UI process."""
+    return (runtime_path()/'cupy/__init__.py').is_file()
+
 def activate():
     root=runtime_path()
     if not root.is_dir():return False

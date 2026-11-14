@@ -1,2 +1,2 @@
-"""Stable release: persistent beta diagnostics disabled."""
+"""Stable portable build: persistent beta diagnostics disabled."""
 BETA_DIAGNOSTICS = False

@@ -1,4 +1,5 @@
 """Rotate an open image and its optional coverage map together."""
+from core.i18n import localize
 import numpy as np
 from scipy.ndimage import rotate as nd_rotate,map_coordinates
 import math
@@ -6,8 +7,8 @@ from modules.stacking.autocrop import crop_bounds,_rotate_mask
 
 
 def rotate_image(data,coverage,angle,crop=True):
-    if not np.isfinite(data).all():raise ValueError('Поворот требует изображение без NaN и бесконечностей.')
-    if not np.isfinite(angle) or not -180<=angle<=180:raise ValueError('Угол должен быть от −180° до 180°.')
+    if not np.isfinite(data).all():raise ValueError(localize('Поворот требует изображение без NaN и бесконечностей.'))
+    if not np.isfinite(angle) or not -180<=angle<=180:raise ValueError(localize('Угол должен быть от −180° до 180°.'))
     quarters=angle/90
     if np.isclose(quarters,round(quarters)):
         turns=int(round(quarters))%4
@@ -27,7 +28,7 @@ def rotate_image(data,coverage,angle,crop=True):
 def crop_rotated(data,coverage,rect,angle):
     """Resample the selected rotated rectangle directly into its output pixels."""
     x,y,width,height=rect
-    if width<1 or height<1:raise ValueError('Нарисуйте область кадрирования.')
+    if width<1 or height<1:raise ValueError(localize('Нарисуйте область кадрирования.'))
     if not angle:
         crop=data[y:y+height,x:x+width].copy()
         count=coverage[y:y+height,x:x+width].copy() if coverage is not None else None

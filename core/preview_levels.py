@@ -39,3 +39,22 @@ def denoise_limits(record):
     if not finite.size:return None
     lo,hi=np.percentile(finite,[.2,99.8])
     return (float(lo),float(hi)) if hi>lo else None
+
+
+def source_display(record,target=.2):
+    """Resolve the original viewport's display, without measuring the result."""
+    data=record.get('data')
+    if data is None:return None,None
+    step=max(1,int(np.ceil(max(data.shape[:2])/1600)))
+    sample=data[::step,::step];finite=sample[np.isfinite(sample)]
+    if not finite.size:return None,None
+    display_range=(float(finite.min()),float(finite.max()))
+    transfer=record.get('fixed_preview_transfer') or checkpoint_transfer(record)
+    if transfer is None:transfer=record.get('display_transfer')
+    if transfer is None:
+        lo,hi=np.percentile(finite,[.2,99.8]);strength=record.get('strength',20)
+        if record.get('auto_stretch',False):
+            from processes.stretch import automatic_strength
+            strength=automatic_strength(finite,lo,hi,target)
+        transfer=(float(lo),float(hi),strength)
+    return display_range,transfer

@@ -26,7 +26,7 @@ class SequencePanel(BasePanel):
   self.list=QListWidget();self.layout.addWidget(self.list);self.list.itemChanged.connect(self.changed);self.list.itemDoubleClicked.connect(self.edit)
   self.button('Выше','Move up',lambda:self.move(-1));self.button('Ниже','Move down',lambda:self.move(1));self.button('Удалить шаг','Remove step',self.remove)
   self.button('Сохранить последовательность','Save sequence',self.export);self.button('Загрузить последовательность','Load sequence',self.load)
-  self.note('Двойной щелчок: настройки шага в JSON. Все шаги рассчитываются в фоне; история обновляется после успешного выполнения всей последовательности. При отмене результаты не применяются.','Double-click: step settings as JSON. Steps run in the background; history is updated after the whole sequence succeeds. Cancellation discards pending results.')
+  self.note('Двойной щелчок: настройки шага в JSON. При отмене результаты не применяются.','Double-click: step settings as JSON. Cancellation discards pending results.')
   self.button('Сброс','Reset',self.reset);self.button('Отмена','Cancel',self.cancel);self.button('Применить','Apply',self.execute);self.refresh()
  def values(self):return {'steps':getattr(self,'steps',[])}
  def refresh(self):

@@ -12,11 +12,16 @@ from .reference import SURVEYS,fetch,load_file,cache_folder
 from . import engine
 
 
-def display_rgb(a):
+def display_rgb(a,display=None):
     finite=a[np.isfinite(a)]
     if not finite.size:return np.zeros((*a.shape[:2],3),np.uint8)
-    lo,hi=np.percentile(finite,[.2,99.8]);b=np.clip((a-lo)/max(1e-12,hi-lo),0,1)
-    b=np.arcsinh(20*b)/np.arcsinh(20)
+    if display is None:lo,hi=np.percentile(finite,[.2,99.8]);strength=20
+    else:
+        enabled,limits,transfer=display
+        lo,hi=transfer[:2] if enabled else limits
+        strength=transfer[2] if enabled else 0
+    b=np.clip((a-lo)/max(1e-12,hi-lo),0,1)
+    if strength:b=np.arcsinh(strength*b)/np.arcsinh(strength)
     if b.ndim==2:b=np.repeat(b[...,None],3,axis=2)
     return (np.nan_to_num(b)*255).astype(np.uint8)
 
@@ -54,6 +59,7 @@ class Comparison(QDialog):
         hint.setWordWrap(True);layout.addWidget(hint)
         preview=QPushButton(tr('Пересчитать','Recalculate'));preview.clicked.connect(lambda:panel.execute(False));layout.addWidget(preview)
         self.commit=QPushButton(tr('Применить','Apply'));self.commit.setEnabled(False);self.approve.toggled.connect(self.commit.setEnabled);self.commit.clicked.connect(lambda:panel.execute(True));layout.addWidget(self.commit)
+        self.commit.setProperty('astraPrimaryAction',True)
     def focus_suspect(self,index):
         model=self.panel.model
         if model is None or not 0<=index<len(model.get('suspects',[])):return
@@ -84,7 +90,7 @@ class Comparison(QDialog):
             self.suspect_index.setItemText(i,f'{i+1}. {reason} · {status}')
         self.suspect_index.blockSignals(False)
         count=sum(r['decision'] is None for r in items)
-        self.suspect_status.setText(self.panel.tr(f'Осталось проверить: {count}. Жёлтая рамка - выбранная область. Это автоматические предположения, проверьте также весь кадр.',f'Regions left to review: {count}. Yellow outline marks the current region. These are heuristic suggestions; inspect the full image too.'))
+        self.suspect_status.setText(self.panel.tr(f'Осталось проверить: {count}. Жёлтая рамка - выбранная область.',f'Regions left to review: {count}. Yellow outline marks the current region.'))
         self.approve.setEnabled(count==0);self.commit.setEnabled(count==0 and self.approve.isChecked())
     def selected_region(self):
         rect=self.left.crop_rect
@@ -93,7 +99,11 @@ class Comparison(QDialog):
     def render(self,*args):
         p=self.panel
         if p.reference is None:return
-        sample=p.data[::p.reference['step'],::p.reference['step']];left=display_rgb(sample);ref=display_rgb(p.reference['data'])
+        from core.preview_levels import source_display
+        record=p.window.documents.get(p.source,{})
+        limits,transfer=source_display(record,float(p.window.settings.value('preview_target',.2)))
+        display=(record.get('stretch',False),limits,transfer) if limits is not None else None
+        sample=p.data[::p.reference['step'],::p.reference['step']];left=display_rgb(sample,display);ref=display_rgb(p.reference['data'])
         ratio=self.blend.value()/100;left=(left*(1-ratio)+ref*ratio).astype(np.uint8)
         right=ref;model=p.model;mode=self.mode.currentIndex()
         if model is not None:self.refresh_suspects()
@@ -111,12 +121,9 @@ class Comparison(QDialog):
                 right=(right*255).astype(np.uint8)
             elif mode==2:
                 # The same transfer as the input makes background changes visible.
-                finite=sample[np.isfinite(sample)];lo,hi=np.percentile(finite,[.2,99.8])
-                b=np.arcsinh(20*np.clip((sample-correction-lo)/max(hi-lo,1e-12),0,1))/np.arcsinh(20)
-                if b.ndim==2:b=np.repeat(b[...,None],3,axis=2)
-                right=(np.nan_to_num(b)*255).astype(np.uint8)
+                right=display_rgb(sample-correction,display)
             elif mode==3:
-                right=display_rgb(sample);right[model['excluded']]=(right[model['excluded']]*.4+np.array([150,40,150])*.6).astype(np.uint8)
+                right=display_rgb(sample,display);right[model['excluded']]=(right[model['excluded']]*.4+np.array([150,40,150])*.6).astype(np.uint8)
                 for x,y in model['points'].astype(int):right[max(0,y-2):y+3,max(0,x-2):x+3]=[80,255,130]
         for kind,color in [('protect',[255,160,50]),('background',[80,255,130])]:
             for x,y,w,h in p.regions[kind]:
@@ -267,7 +274,7 @@ class ReferenceBackgroundPanel(BasePanel):
             def complete(model):
                 if generation!=self.generation or not self.valid():return
                 model['apply_mask']=mask
-                self.model=model;self.status.setText(self.tr(f'Участков фона: {model["count"]}. Проверьте удаляемый фон и подтвердите сверку.',f'Background samples: {model["count"]}. Inspect the removed background and confirm your review.'));self.compare();self.comparison.mode.setCurrentIndex(1);self.comparison.render()
+                self.model=model;self.status.setText(self.tr(f'Участков фона: {model["count"]}. Подтвердите сверку фона.',f'Background samples: {model["count"]}. Confirm the background review.'));self.compare();self.comparison.mode.setCurrentIndex(1);self.comparison.render()
             def calculate(job):
                 if mask is not None:
                     if mask.shape!=data.shape[:2]:raise ValueError(localize('Размер маски не совпадает.'))

@@ -43,7 +43,7 @@ class ReviewDialog(QDialog):
   for key in ('fwhm','eccentricity','noise','background','stars'):
    self.metric_selector.addItem(metrics[key],key)
   layout.addWidget(self.metric_selector);self.plot=MetricPlot();layout.addWidget(self.plot);self.metric_selector.currentIndexChanged.connect(self.graph)
-  note=QLabel(self.tr('Оценки по моментам звёзд, не PSF PixInsight. Зависят от порога и радиуса. Недоступные значения: -. Двойной щелчок открывает Blink. График: X - порядок файлов, Y - выбранная метрика.','Star moment estimates, not PixInsight PSF fitting. Depend on threshold and radius. Unavailable: -. Double-click opens Blink. Plot: X=file order, Y=selected metric.'));note.setWordWrap(True);layout.addWidget(note)
+  note=QLabel(self.tr('Оценки по моментам звёзд, не PSF PixInsight. Зависят от порога и радиуса. Недоступные значения: -. Двойной щелчок открывает сравнение кадров. График: X - порядок файлов, Y - выбранная метрика.','Star moment estimates, not PixInsight PSF fitting. Depend on threshold and radius. Unavailable: -. Double-click opens Blink. Plot: X=file order, Y=selected metric.'));note.setWordWrap(True);layout.addWidget(note)
   row=QHBoxLayout();layout.addLayout(row);self.min_stars=QSpinBox();self.min_stars.setRange(0,100000);self.max_fwhm=QDoubleSpinBox();self.max_fwhm.setRange(.1,1000);self.max_fwhm.setValue(20);self.max_ecc=QDoubleSpinBox();self.max_ecc.setRange(0,1);self.max_ecc.setValue(.8)
   self.min_stars.setValue(5)
   for name,field in [(metrics['stars']+' ≥',self.min_stars),('FWHM ≤',self.max_fwhm),(metrics['eccentricity']+' ≤',self.max_ecc)]:row.addWidget(QLabel(name));row.addWidget(field)
@@ -100,7 +100,7 @@ class ReviewDialog(QDialog):
 
 class BlinkDialog(QDialog):
  def __init__(self,w):
-  super().__init__(w);self.w=w;self.tr=w.trtext;self.setWindowTitle('Blink');fit_screen(self,0.742,0.778);layout=QVBoxLayout(self);self.info=QLabel();self.info.setFixedHeight(self.fontMetrics().height()+10);layout.addWidget(self.info);self.view=ImageView();layout.addWidget(self.view,1);row=QHBoxLayout();layout.addLayout(row);self.index=0;self.paths=[];self.loading=False;self.displayed=None;self.preview_step=1
+  super().__init__(w);self.w=w;self.tr=w.trtext;self.setWindowTitle(self.tr('Сравнение кадров', 'Blink'));fit_screen(self,0.742,0.778);layout=QVBoxLayout(self);self.info=QLabel();self.info.setFixedHeight(self.fontMetrics().height()+10);layout.addWidget(self.info);self.view=ImageView();layout.addWidget(self.view,1);row=QHBoxLayout();layout.addLayout(row);self.index=0;self.paths=[];self.loading=False;self.displayed=None;self.preview_step=1
   self.timer=QTimer(self);self.timer.timeout.connect(lambda:self.advance(1));self.speed=QDoubleSpinBox();self.speed.setRange(.1,10);self.speed.setValue(1);self.speed.setSuffix(' s');self.speed.valueChanged.connect(lambda v:self.timer.setInterval(int(v*1000)))
   self.speed.setValue(float(w.settings.value('stack/blink_speed',1)));self.speed.valueChanged.connect(lambda value:w.settings.setValue('stack/blink_speed',value))
   for text,fn in [('◀',lambda:self.advance(-1)),('▶',lambda:self.advance(1))]:b=QPushButton(text);b.clicked.connect(fn);row.addWidget(b)
@@ -130,7 +130,7 @@ class BlinkDialog(QDialog):
     item=self.w.lists['Lights'].item(i)
     if item.text()==path:self.checked.setChecked(item.data(Qt.UserRole) is not False)
    self.checked.blockSignals(False)
-  if launch(self.w,'Blink',work,done):
+  if launch(self.w,self.windowTitle(),work,done):
    self.w.native_job.finished.connect(lambda:setattr(self,'loading',False));self.w.native_job.error.connect(lambda error:self.play.setChecked(False))
   else:self.loading=False
  def mark(self,value):

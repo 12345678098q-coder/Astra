@@ -1,16 +1,19 @@
 """Installation guidance targets the exact interpreter running Astra."""
 from core.responsive import fit_screen
 from core.i18n import localize
+import json
 import sys
 from pathlib import Path
 from PySide6.QtWidgets import QDialog,QVBoxLayout,QLabel,QPushButton,QProgressBar,QMessageBox
 from PySide6.QtCore import QThread,Signal,QProcess,QProcessEnvironment
 from .gpu_runtime import runtime_path
+from .cuda_support import CUDA_ARCHIVE_URL
 
 def installation_details():
  exe=Path(sys.executable)
  if exe.name.lower()=='pythonw.exe':exe=exe.with_name('python.exe')
  requirements=Path(__file__).resolve().parent.parent/'requirements-cuda.txt'
+ if not requirements.is_file():requirements=requirements.parent/'build-support'/requirements.name
  command=f'& "{exe}" -m pip install --no-deps --target "{runtime_path()}" -r "{requirements}"'
  return exe,requirements,command
 
@@ -25,14 +28,15 @@ class GpuCheck(QThread):
         self.result.emit(info)
 
 class GpuSetupDialog(QDialog):
-    def __init__(self,owner):
-        super().__init__(owner);self.owner=owner;self.tr=owner.trtext;self.info={};self.process=None;self.output=''
+    def __init__(self,owner,parent=None):
+        super().__init__(parent if parent is not None else owner);self.owner=owner;self.tr=owner.trtext;self.info={};self.process=None;self.output=''
         self.setWindowTitle(self.tr('Поддержка NVIDIA GPU','NVIDIA GPU support'));fit_screen(self,0.5,0.289)
         layout=QVBoxLayout(self);self.status=QLabel(self.tr('Проверка видеокарты и драйвера…','Checking GPU and driver…'));self.status.setWordWrap(True);layout.addWidget(self.status)
-        hint=QLabel(self.tr('Для CUDA нужна совместимая видеокарта NVIDIA и драйвер. Установка выполняется автоматически в отдельную папку; после завершения перезапустите Astra.','CUDA requires a compatible NVIDIA GPU and driver. Libraries are installed automatically into a separate folder. Restart Astra afterwards.'));hint.setWordWrap(True);layout.addWidget(hint)
+        hint=QLabel(self.tr('Для CUDA нужна совместимая видеокарта NVIDIA и драйвер. Библиотеки устанавливаются в отдельную папку Astra.','CUDA requires a compatible NVIDIA GPU and driver. Libraries are installed in a separate Astra folder.'));hint.setWordWrap(True);layout.addWidget(hint)
         path=QLabel(self.tr('Папка установки: ','Installation folder: ')+str(runtime_path()));path.setWordWrap(True);layout.addWidget(path)
+        source=QLabel(f'<a href="{CUDA_ARCHIVE_URL}">Astra-CUDA.zip</a>');source.setOpenExternalLinks(True);layout.addWidget(source)
         self.progress=QProgressBar();self.progress.setRange(0,0);layout.addWidget(self.progress)
-        self.install_button=QPushButton(self.tr('Установить CUDA','Install CUDA'));self.install_button.setEnabled(False);self.install_button.clicked.connect(self.install);layout.addWidget(self.install_button)
+        self.install_button=QPushButton(self.tr('Скачать и установить CUDA с GitHub','Download and install CUDA from GitHub'));self.install_button.setEnabled(False);self.install_button.clicked.connect(self.install);layout.addWidget(self.install_button)
         self.close_button=QPushButton(self.tr('Закрыть','Close'));self.close_button.clicked.connect(self.reject);layout.addWidget(self.close_button)
         self.check=GpuCheck(self);self.check.result.connect(self.checked);self.check.finished.connect(self.check_finished);self.check.start()
     def checked(self,info):
@@ -64,7 +68,12 @@ class GpuSetupDialog(QDialog):
             read_output()
             self.progress.hide();self.close_button.setEnabled(True)
             if code==0 and status==QProcess.NormalExit:
-                self.status.setText(self.tr('CUDA установлена. Перезапустите Astra.','CUDA installed. Restart Astra.'));self.install_button.setText(self.tr('Установлено','Installed'))
+                self.owner.stack_options['device'] = 'auto'
+                self.owner.settings.setValue('stack_options', json.dumps(self.owner.stack_options))
+                self.status.setText(self.tr(
+                    'CUDA установлена. Для сложения включён режим «Авто: CUDA / CPU».',
+                    'CUDA is installed. Stacking now uses Auto: CUDA / CPU.'))
+                self.install_button.setText(self.tr('Установлено','Installed'))
             else:
                 self.status.setText(self.tr('Установка не завершена. Можно повторить попытку.','Installation failed. You can retry.'));self.install_button.setEnabled(True)
                 lines=[line.strip() for line in self.output.splitlines() if line.strip()]
@@ -74,7 +83,7 @@ class GpuSetupDialog(QDialog):
             if error==QProcess.FailedToStart:
                 self.output=process.errorString();finished(-1,QProcess.CrashExit)
         process.errorOccurred.connect(failed)
-        process.start(str(exe),['-u','-B',str(Path(__file__).with_name('cuda_support.py')),str(runtime_path()),str(requirements)])
+        process.start(str(exe),['-u','-B',str(Path(__file__).with_name('cuda_support.py')),str(runtime_path()),'--github'])
     def reject(self):
         if self.process is not None and self.process.state()!=QProcess.NotRunning:return
         if self.check.isRunning():self.close_when_ready=True;return
@@ -83,5 +92,5 @@ class GpuSetupDialog(QDialog):
         if (self.process is not None and self.process.state()!=QProcess.NotRunning) or self.check.isRunning():self.reject();event.ignore()
         else:super().closeEvent(event)
 
-def show_gpu_setup(owner):
-    GpuSetupDialog(owner).exec()
+def show_gpu_setup(owner, parent=None):
+    GpuSetupDialog(owner, parent).exec()

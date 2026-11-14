@@ -15,6 +15,7 @@ def read(path,allow_photos=False):
         if Path(p).suffix.lower() in extensions():return read_photo(p)
     if p.lower().endswith(('.fit','.fits','.fts')):
         with fits.open(p, memmap=False) as f:
+            f.verify('silentfix')
             x=next(v for v in f if isinstance(v,(fits.PrimaryHDU,fits.ImageHDU,fits.CompImageHDU)) and v.header.get('NAXIS',0)>=2)
             pixels=int(np.prod([x.header.get('NAXIS'+str(i),1) for i in range(1,x.header['NAXIS']+1)]))
             require_memory(pixels*max(4,abs(x.header.get('BITPIX',32))//8)*3,localize('Декодирование FITS'))
@@ -70,5 +71,3 @@ def debayer(a, pattern):
         kernel=np.array([[1,2,1],[2,4,2],[1,2,1]],float)
         out.append(convolve(a*mask,kernel,mode='mirror')/np.maximum(convolve(mask,kernel,mode='mirror'),1e-12))
     return np.stack(out,axis=-1)
-
-

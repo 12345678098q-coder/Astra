@@ -50,7 +50,9 @@ def find_tool(tool,configured=''):
             if path.is_file():return path
         candidates=list((ROOT/'starnet').rglob('starnet2.exe'))
         return max(candidates,key=lambda p:p.parent.name) if candidates else None
-    if tool=='graxpert':return next((ROOT/'graxpert').rglob('GraXpert.exe'),None)
+    if tool=='graxpert':
+        pinned=next((ROOT/'graxpert'/GRA_VERSION).rglob('GraXpert.exe'),None)
+        return pinned or next((ROOT/'graxpert').rglob('GraXpert.exe'),None)
     path=shutil.which('rc-astro')
     default=Path(os.environ.get('ProgramFiles','C:/Program Files'))/'RC-Astro/CLI/rc-astro.exe'
     return Path(path) if path else default if default.exists() else None
@@ -108,13 +110,15 @@ def update_tool(tool,install,configured,log):
         return
     if tool=='graxpert':
         log(localize('GraXpert: закреплена ')+GRA_VERSION+'; '+(localize('установлен') if exe else localize('не установлен')))
-        if not exe and install:
+        from .download_links import graxpert_version
+        if install and graxpert_version(exe)!=GRA_VERSION:
             release=request_json('https://api.github.com/repos/Steffenhir/GraXpert/releases/tags/'+GRA_VERSION)
             asset=next(a for a in release['assets'] if a['name']=='graxpert-windows-amd64.msi')
             installer=ROOT/('graxpert-'+GRA_VERSION+'.msi'); download(asset['browser_download_url'],installer,(asset.get('digest') or '').removeprefix('sha256:') or None)
-            folder=ROOT/'graxpert'; folder.mkdir(exist_ok=True)
+            folder=ROOT/'graxpert'/GRA_VERSION; folder.mkdir(parents=True,exist_ok=True)
             run(['msiexec.exe','/a',installer,'/qn','TARGETDIR='+str(folder)],900)
             exe=find_tool('graxpert')
+            if graxpert_version(exe)!=GRA_VERSION:raise ValueError(localize('Не удалось проверить версию GraXpert','Could not verify GraXpert version'))
         if exe:graxpert_models(exe,install,log)
         return
     if not exe:log(localize('RC-Astro: не установлен. Укажите путь к CLI.')); return
@@ -139,4 +143,3 @@ class UpdateJob(QThread):
             if self.isInterruptionRequested():break
             try:update_tool(tool,install,path,self.note.emit)
             except Exception as e:self.note.emit(tool+localize(': ошибка - ')+str(e))
-        self.note.emit(localize('Проверка завершена.'))

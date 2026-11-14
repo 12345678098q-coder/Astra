@@ -33,17 +33,17 @@ def automatic_masks(source,cancel=lambda:False,progress=lambda text:None):
 
 def coefficients(model):
     meta=json.loads(str(model['meta']));policy=meta.get('automatic_mask_policy',{})
-    if policy and policy.get('version')!=1:raise ValueError('Unsupported automatic mask policy')
+    if policy and policy.get('version')!=1:raise ValueError(localize('Неподдерживаемый режим автоматической маски'))
     values=np.asarray(policy.get('weights',DEFAULT_WEIGHTS),dtype=float)
     if values.shape!=(3,) or not np.isfinite(values).all() or np.any((values<0)|(values>1)):
-        raise ValueError('Invalid automatic region weights')
+        raise ValueError(localize('Некорректные веса областей автоматической маски'))
     return values
 
 def apply(source,model,strength=1.,preserve=True,cancel=lambda:False,progress=lambda text:None,device='auto',recipe=None):
     from PaletteLab import editor_model
     if json.loads(str(model['meta'])).get('kind')!=editor_model.KIND:
         raise ValueError(localize('Для автоматической обработки нужна модель подбора кривых Palette Lab.'))
-    if not np.isfinite(strength) or not 0<=strength<=1:raise ValueError('Invalid strength')
+    if not np.isfinite(strength) or not 0<=strength<=1:raise ValueError(localize('Некорректная интенсивность'))
     weights=coefficients(model)
     if cancel():raise InterruptedError(localize('Отменено'))
     if strength==0:return source.copy()

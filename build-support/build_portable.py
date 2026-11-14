@@ -23,7 +23,7 @@ from check_package import check
 
 
 def requirements():
-    pending=[Requirement(line.strip()) for line in (ROOT/'requirements.txt').read_text().splitlines() if line.strip() and not line.startswith('#')]
+    pending=[Requirement(line.strip()) for line in (ROOT/'build-support/requirements.txt').read_text().splitlines() if line.strip() and not line.startswith('#')]
     pending.append(Requirement('pip'));found={}
     while pending:
         requirement=pending.pop()

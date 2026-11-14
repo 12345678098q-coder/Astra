@@ -2,9 +2,9 @@ from core.responsive import fit_screen
 from core.i18n import localize
 import json
 from pathlib import Path
-from PySide6.QtCore import QSize,Qt
+from PySide6.QtCore import QSize,Qt,QTimer
 from PySide6.QtWidgets import *
-from modules.stacking.engine import DEFAULT_STACK_OPTIONS
+from modules.stacking.defaults import DEFAULT_STACK_OPTIONS
 from core.resources import plan_resources
 FILTER='Астроизображения (*.fit *.fits *.fts *.tif *.tiff *.xisf);;RAW фотоаппаратов и другие файлы (*.*)'
 
@@ -14,8 +14,8 @@ class ComboItemDelegate(QStyledItemDelegate):
         return QSize(size.width(),max(30,option.fontMetrics.height()+12))
 
 class StackSettingsMixin:
-    def stacking_preferences(self):
-        dialog=QDialog(self); dialog.setWindowTitle(self.trtext('Настройки сложения','Stacking settings')); fit_screen(dialog,0.5,0.467)
+    def stacking_preferences(self, *, learning=False):
+        dialog=QDialog(self.module if learning else self); dialog.setWindowTitle(self.trtext('Настройки сложения','Stacking settings')); fit_screen(dialog,0.5,0.467)
         outer=QVBoxLayout(dialog); tabs=QTabWidget(); outer.addWidget(tabs); fields={}; rows={}
         sections=[
             ('Сложение','Integration',[
@@ -45,6 +45,7 @@ class StackSettingsMixin:
                 ('cosmetic_sigma','Порог дефектных пикселей, σ','Defect threshold, σ',(3.0,20.0,0.5))]),
             ('Смаз','Motion',[
                 ('motion_enabled','Исправлять light-кадры до совмещения','Correct light frames before registration',True),
+                ('motion_estimate','Подбирать параметры автоматически','Estimate parameters automatically',True),
                 ('motion_auto','Оценивать отдельно для каждого кадра','Estimate separately for each frame',True),
                 ('motion_length','Длина смаза, пикс.','Motion length, px',(0.0,20.0,0.1)),
                 ('motion_angle','Угол, ° (0 вправо, 90 вниз)','Angle, ° (0 right, 90 down)',(0.0,180.0,0.1)),
@@ -52,6 +53,7 @@ class StackSettingsMixin:
                 ('motion_strength','Сила коррекции','Correction strength',(0.0,1.0,0.1))]),
             ('Drizzle','Drizzle',[
                 ('drizzle','Включить drizzle','Enable drizzle',True),
+                ('drizzle_cfa','CFA Drizzle – цвет из исходной Bayer-матрицы','CFA Drizzle – color from the original Bayer mosaic',True),
                 ('drizzle_scale','Масштаб','Scale',[('1×',1),('2×',2),('3×',3)]),
                 ('pixfrac','Размер капли (pixfrac)','Drop size (pixfrac)',(0.1,1.0,0.1))]),
             ('Ресурсы','Resources',[
@@ -92,7 +94,7 @@ class StackSettingsMixin:
             elif ru=='Смаз':
                 note=QLabel(self.trtext('Необязательная коррекция короткого прямолинейного смаза, после калибровки и дебаера, до совмещения. Автооценка требует минимум 5 согласованных звёзд; при неуверенной оценке кадр остаётся без коррекции, причина записывается в журнал. Ручные параметры одинаковы для всех lights. В режиме звёздных треков отключена.\nДля одиночного фото или готового стека: Инструменты → Коррекция смаза. Не используйте коррекцию дважды.','Optional short straight motion correction after calibration and debayer, before registration. Auto estimation requires at least 5 consistent stars; uncertain frames are left unchanged and logged. Manual settings apply to all lights. Disabled for star trails.\nFor a single image or integrated result: Tools → Motion correction. Do not correct twice.'));note.setWordWrap(True);form.addRow(note)
             elif ru=='Drizzle':
-                note=QLabel(self.trtext('Нужны кадры с субпиксельными сдвигами. Масштаб 2× увеличивает площадь в 4 раза.','Subpixel dithers are needed. 2× scale uses 4× the area.')); note.setWordWrap(True); form.addRow(note)
+                note=QLabel(self.trtext('Нужны кадры с субпиксельными сдвигами. Масштаб 2× увеличивает площадь в 4 раза. CFA Drizzle: выберите Bayer или RAW в основном окне. Калибровка выполняется до реконструкции цвета; коррекция смаза несовместима. Рекомендуемый старт: масштаб 1×, pixfrac 1. Отбраковка требует минимум 5 отсчётов на пиксель канала.','Subpixel dithers are needed. 2× scale uses 4× the area. CFA Drizzle requires Bayer or RAW in the main window. Calibration precedes color reconstruction; motion correction is incompatible. Start with scale 1× and pixfrac 1. Rejection requires at least 5 samples per channel pixel.')); note.setWordWrap(True); form.addRow(note)
             elif ru=='Ресурсы':
                 status=QLabel(plan_resources().description()); status.setWordWrap(True); form.addRow(status)
                 cache=QLineEdit(self.stack_options['cache_dir']); cache.setPlaceholderText(self.trtext('Системная временная папка','System temporary folder')); fields['cache_dir']=cache
@@ -109,22 +111,28 @@ class StackSettingsMixin:
             trails=fields['method'].currentData()=='trails'
             fields['motion_enabled'].setEnabled(not trails)
             motion=fields['motion_enabled'].isChecked() and not trails
-            for key in ('motion_auto','motion_regularization','motion_strength'):fields[key].setEnabled(motion)
-            for key in ('motion_length','motion_angle'):fields[key].setEnabled(motion and not fields['motion_auto'].isChecked())
+            for key in ('motion_estimate','motion_regularization','motion_strength'):fields[key].setEnabled(motion)
+            for key in ('motion_length','motion_angle'):fields[key].setEnabled(motion and not fields['motion_estimate'].isChecked())
             if trails:fields['drizzle'].setChecked(False)
             fields['drizzle'].setEnabled(not trails)
             for key in ('align','normalize','hot','cold'):fields[key].setEnabled(not trails)
-            drizzle=fields['drizzle'].isChecked(); sigma=fields['method'].currentData() in ('mad','sigma','winsorized') and not drizzle
+            drizzle=fields['drizzle'].isChecked(); cfa=drizzle and fields['drizzle_cfa'].isChecked()
+            fields['drizzle_cfa'].setEnabled(drizzle)
+            fields['motion_enabled'].setEnabled(not trails and not cfa)
+            if cfa:fields['motion_enabled'].setChecked(False)
+            fields['motion_auto'].setEnabled(motion and not cfa and fields['motion_estimate'].isChecked())
+            sigma=fields['method'].currentData() in ('mad','sigma','winsorized') and (not drizzle or cfa)
             fields['selection_percent'].setEnabled(fields['selection_enabled'].isChecked())
             fields['auto_crop_rotate'].setEnabled(fields['auto_crop'].isChecked())
             for key in ('sigma_low','sigma_high','iterations'):
                 form,field=rows[key]; form.setRowVisible(field,sigma)
-            fields['method'].setEnabled(not drizzle); fields['device'].setEnabled(not drizzle and not fields['auto_resources'].isChecked())
+            fields['method'].setEnabled(not drizzle or cfa); fields['device'].setEnabled(not drizzle and not fields['auto_resources'].isChecked())
             for key in ('drizzle_scale','pixfrac'):fields[key].setEnabled(drizzle)
         fields['neutralize_rgb'].toggled.connect(update_fields)
         fields['auto_crop'].toggled.connect(update_fields)
-        fields['motion_enabled'].toggled.connect(update_fields);fields['motion_auto'].toggled.connect(update_fields)
+        fields['motion_enabled'].toggled.connect(update_fields);fields['motion_auto'].toggled.connect(update_fields);fields['motion_estimate'].toggled.connect(update_fields)
         fields['auto_resources'].toggled.connect(update_fields)
+        fields['drizzle_cfa'].toggled.connect(update_fields)
         fields['selection_enabled'].toggled.connect(update_fields)
         fields['method'].currentIndexChanged.connect(update_fields); fields['drizzle'].toggled.connect(update_fields); update_fields()
         def defaults():
@@ -143,5 +151,7 @@ class StackSettingsMixin:
             self.settings.setValue('stack/autosave_dir',output.text())
             self.stack_options={**self.stack_options,**values}; self.settings.setValue('stack_options',json.dumps(self.stack_options));self.selection_check.setChecked(values['selection_enabled']);self.selection_percent.setValue(values['selection_percent']); dialog.accept()
         buttons.accepted.connect(save_options); buttons.rejected.connect(dialog.reject); buttons.button(QDialogButtonBox.RestoreDefaults).clicked.connect(defaults)
+        if learning:
+            from core.stacking_tour import show_settings_tour
+            QTimer.singleShot(0, dialog, lambda: show_settings_tour(self, dialog, tabs, fields, browse_output))
         dialog.exec()
-

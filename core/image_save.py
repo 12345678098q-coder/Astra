@@ -1,4 +1,5 @@
 """Atomic image saving with explicit pixel encoding."""
+from core.i18n import localize
 import os
 import tempfile
 from pathlib import Path
@@ -15,7 +16,7 @@ def encode_pixels(data, depth, integer_range='unit'):
         values=values*maximum
     elif integer_range=='image':
         finite=values[np.isfinite(values)]
-        if not finite.size:raise ValueError('Нет конечных пикселей для сохранения.')
+        if not finite.size:raise ValueError(localize('Нет конечных пикселей для сохранения.'))
         low,high=finite.min(),finite.max()
         values=(values-low)*(maximum/(high-low)) if high>low else np.zeros_like(values)
     return np.rint(np.clip(np.nan_to_num(values,nan=0,posinf=maximum,neginf=0),0,maximum)).astype(depth)

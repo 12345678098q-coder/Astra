@@ -10,8 +10,8 @@ from PIL import Image
 def export(data, path, stretched=False, strength=20, auto=False, target=.2, display=False,
            cancel=lambda:False, progress=lambda done,total:None, display_limits=None):
     path=Path(path)
-    if path.suffix.lower() not in ('.jpg','.jpeg','.png'):raise ValueError('Expected JPEG or PNG')
-    if data.ndim not in (2,3) or (data.ndim==3 and data.shape[2]!=3):raise ValueError('Expected mono or RGB')
+    if path.suffix.lower() not in ('.jpg','.jpeg','.png'):raise ValueError(localize('Ожидается формат JPEG или PNG'))
+    if data.ndim not in (2,3) or (data.ndim==3 and data.shape[2]!=3):raise ValueError(localize('Требуется монохромное или RGB-изображение'))
     step=max(1,int(np.ceil(max(data.shape[:2])/1600)))
     sample=data[::step,::step];finite=sample[np.isfinite(sample)]
     if not finite.size:raise ValueError(localize('Нет конечных пикселей'))

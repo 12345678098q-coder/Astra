@@ -1,3 +1,4 @@
+from core.image_selector import ImageSelector
 from core.responsive import set_em_size
 from core.i18n import localize
 import json
@@ -13,14 +14,17 @@ class PalettePanel(BasePanel):
   super().__init__(window,'palettes');self.guard=True;self.selectors={};self.rows={};self.preview_transfer=None
   self.mode=QComboBox()
   for code,ru,en in [('mono','Моно','Mono'),('rgb','RGB','RGB')]:self.mode.addItem(self.tr(ru,en),code)
-  saved_mode=self.saved.get('mode','mono')
+  active=window.documents.get(window.mdi.activeSubWindow())
+  default_mode='rgb' if active is not None and active['data'].ndim==3 else 'mono'
+  saved_mode=self.saved.get('mode',default_mode)
   if saved_mode not in ('mono','rgb'):
    self.saved['mode']='rgb'
    sources=self.saved.setdefault('sources',{})
    if saved_mode in ('osc_hoo','dual_sho'):sources['rgb']=sources.get('first','')
-  self.mode.setCurrentIndex(max(0,self.mode.findData(self.saved.get('mode','mono'))));self.form.addRow(self.tr('Источники','Sources'),self.mode)
+  self.mode.setCurrentIndex(max(0,self.mode.findData(self.saved.get('mode',default_mode))));self.form.addRow(self.tr('Источники','Sources'),self.mode)
   for key,ru,en in [('ha','Ha / A','Ha / A'),('o','OIII / B','OIII / B'),('s','SII / C','SII / C'),('rgb','RGB','RGB')]:
-   box=QComboBox();set_em_size(box,'setMinimumWidth',3.75);box.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Fixed);self.selectors[key]=box;self.form.addRow(self.tr(ru,en),box);box.currentIndexChanged.connect(self.source_changed)
+   box=ImageSelector(self.refresh);set_em_size(box,'setMinimumWidth',3.75);box.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Fixed);self.selectors[key]=box;self.form.addRow(self.tr(ru,en),box);box.currentIndexChanged.connect(self.source_changed)
+  self.source_hint=self.note('Для цветного кадра выберите RGB в списке «Источники».','For a color image, select RGB under Sources.')
   self.button('Обновить список кадров','Refresh images',self.refresh)
   self.preset=QComboBox()
   for name in PRESETS:self.preset.addItem(name,name)
@@ -51,8 +55,8 @@ class PalettePanel(BasePanel):
   for code,ru,en in [('preserve','Сохранить значения','Preserve data range'),('rescale','Общий масштаб в 0…1','Rescale all RGB to 0…1'),('clip','Обрезать в 0…1','Clip to 0…1')]:self.output_range.addItem(self.tr(ru,en),code)
   self.output_range.setCurrentIndex(max(0,self.output_range.findData(self.saved.get('range','rescale'))));self.form.addRow(self.tr('Диапазон результата','Result range'),self.output_range);self.output_range.currentIndexChanged.connect(self.save)
   self.destination=QComboBox();self.destination.addItem(self.tr('Создать новый кадр','Create new image'),'new');self.destination.addItem(self.tr('Применить к выбранному RGB','Apply to selected RGB'),'current');self.destination.setCurrentIndex(max(0,self.destination.findData(self.saved.get('destination','new'))));self.form.addRow(self.tr('Результат','Destination'),self.destination)
-  self.target=QComboBox();self.form.addRow(self.tr('Кадр для применения','Target image'),self.target)
-  self.text('name','Название нового кадра','New image name','palette')
+  self.target=ImageSelector(self.refresh);self.form.addRow(self.tr('Кадр для применения','Target image'),self.target)
+  self.text('name','Название нового кадра','New image name',self.tr('Палитра', 'palette'))
   self.check('preview_stretch','Предрастяжка предпросмотра','Preview screen stretch',True)
   self.status=self.note('','')
   self.note('Матрицы - из Palette Mixer 1.1.0.','Matrices come from Palette Mixer 1.1.0.')
@@ -76,11 +80,11 @@ class PalettePanel(BasePanel):
  def save(self,*args):
   if self.guard:return
   super().save()
-  if hasattr(self,'preview_timer') and getattr(self,'temporary_preview',None) is not None and self.temporary_preview.isVisible():self.preview_timer.start()
+  if hasattr(self,'preview_timer') and self.has_preview():self.preview_timer.start()
  def live_preview(self):
   from core.resources import heavy_job_running
   if heavy_job_running(self.window):self.preview_timer.start();return
-  if self.temporary_preview.isVisible():self.execute(False)
+  if self.has_preview():self.execute(False)
  def clear_preview(self):
   super().clear_preview();self.preview_transfer=None
  def matrix_edited(self,*args):
@@ -117,14 +121,15 @@ class PalettePanel(BasePanel):
     if (record['data'].ndim==2)==(key in ('ha','o','s')):box.addItem(window.windowTitle(),window)
    index=box.findData(selected) if selected is not None else -1
    if index<0:index=box.findText(title)
-   if index<0 and key in ('rgb','first','target'):index=box.findData(self.window.mdi.activeSubWindow())
+   if index<=0 and key in ('rgb','target'):index=box.findData(self.window.mdi.activeSubWindow())
    box.setCurrentIndex(max(0,index));box.blockSignals(False)
   self.guard=guard
+  self.source_hint.setVisible(self.mode.currentData()=='mono' and self.selectors['ha'].count()==1 and self.selectors['rgb'].count()>1)
  def reset(self):
   self.cancel();self.guard=True
   for key,field in self.fields.items():
    if isinstance(field,QCheckBox):field.setChecked(key=='preview_stretch')
-   elif isinstance(field,QLineEdit):field.setText('palette')
+   elif isinstance(field,QLineEdit):field.setText(self.tr('Палитра', 'palette'))
    else:field.setValue(DEFAULTS[key])
   self.mode.setCurrentIndex(self.mode.findData('mono'));self.preset.setCurrentIndex(self.preset.findData('SHO Hubble'));self.destination.setCurrentIndex(0);self.output_range.setCurrentIndex(self.output_range.findData('rescale'));self.green.setCurrentIndex(0);self.guard=False;self.apply_preset();self.sync()
  def execute(self,apply):
@@ -155,7 +160,7 @@ class PalettePanel(BasePanel):
     self.clear_preview()
     if s['destination']=='current':self.window.apply_image_result(source,result,'PAL')
     else:
-     name=s['name'].strip() or 'palette';existing={w.windowTitle() for w in self.window.documents};base=name;n=2
+     name=s['name'].strip() or self.tr('Палитра', 'palette');existing={w.windowTitle() for w in self.window.documents};base=name;n=2
      while name in existing:name=f'{base}_{n}';n+=1
      self.window.data=result;self.window.count=None;self.window.next_image_title=name;self.window.showimage()
    else:
@@ -165,7 +170,8 @@ class PalettePanel(BasePanel):
      if finite.size:
       from processes.stretch import automatic_strength
       lo,hi=np.percentile(finite,[.2,99.8]);self.preview_transfer=(float(lo),float(hi),automatic_strength(finite,lo,hi))
-    self.temporary_preview=show_preview(self.window,result,'Palette Mixer',self.fields['preview_stretch'].isChecked(),source=source,display_stretch=self.preview_transfer)
+    self.temporary_preview=show_preview(self.window,result,'Palette Mixer',self.fields['preview_stretch'].isChecked(),source=source,display_range=(0.,1.),display_stretch=self.preview_transfer)
+    self.temporary_preview.tool_owner=self
    self.status.setText(self.tr('Готово: ','Done: ')+s['preset'])
   estimated=sum(a.nbytes for a in sources.values())+captured[0][1].shape[0]*captured[0][1].shape[1]*8*24
   launch(self.window,'Palette Mixer',work,done,estimated)

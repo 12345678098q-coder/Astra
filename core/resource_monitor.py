@@ -18,7 +18,7 @@ class ResourceMonitor(QLabel):
             'CPU - total processor usage. RAM - used system memory. '
             'Astra - application process memory, excluding external tools. Updates every 2 seconds.'))
         psutil.cpu_percent(interval=None)  # Prime the counter; never block for a sample.
-        self.setText('CPU —  ·  '+trtext('ОЗУ', 'RAM')+' —  ·  Astra —')
+        self.setText('CPU -  ·  '+trtext('ОЗУ', 'RAM')+' -  ·  Astra -')
         self.timer = QTimer(self)
         self.timer.setInterval(2000)
         self.timer.timeout.connect(self.refresh)
@@ -28,15 +28,15 @@ class ResourceMonitor(QLabel):
         try:
             cpu = f'{psutil.cpu_percent(interval=None):.0f}%'
         except (psutil.Error, OSError):
-            cpu = '—'
+            cpu = '-'
         try:
             memory = psutil.virtual_memory()
             used = max(0, memory.total-memory.available)/1024**3
             ram = f'{used:.1f}/{memory.total/1024**3:.1f} '+self.trtext('ГБ', 'GB')
         except (psutil.Error, OSError):
-            ram = '—'
+            ram = '-'
         try:
             own = f'{self.process.memory_info().rss/1024**2:.0f} '+self.trtext('МБ', 'MB')
         except (psutil.Error, OSError):
-            own = '—'
+            own = '-'
         self.setText(f'CPU {cpu}  ·  {self.trtext("ОЗУ", "RAM")} {ram}  ·  Astra {own}')

@@ -5,7 +5,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import *
 from astropy.io import fits
 from core.image_io import read
-from .masters import is_master
+from .masters import category_label, is_master
 FILTER='Астроизображения (*.fit *.fits *.fts *.tif *.tiff *.xisf);;RAW фотоаппаратов и другие файлы (*.*)'
 
 class StackFilesMixin:
@@ -32,8 +32,8 @@ class StackFilesMixin:
     def add_master(self):
         name=self.current_category()
         if name=='Lights':
-            QMessageBox.information(self,localize('Мастер-кадр'),localize('Выберите Darks, Flats или Dark flats.')); return
-        path,_=QFileDialog.getOpenFileName(self,localize('Готовый мастер ')+name,str(self.settings.value('stack/folders/'+name,'')),localize(FILTER))
+            QMessageBox.information(self,localize('Мастер-кадр'),localize('Выберите дарки, флеты или дарк-флеты.', 'Select Darks, Flats or Dark flats.')); return
+        path,_=QFileDialog.getOpenFileName(self,localize('Готовый мастер ')+category_label(name),str(self.settings.value('stack/folders/'+name,'')),localize(FILTER))
         if not path:return
         lst=self.lists[name]
         if lst.count() and QMessageBox.question(self,localize('Мастер-кадр'),localize('Заменить кадры этой категории готовым мастером?'))!=QMessageBox.Yes:return
@@ -46,7 +46,7 @@ class StackFilesMixin:
     def refresh_files(self,*args):
         if not hasattr(self,'tables'):return
         for index,(name,lst) in enumerate(self.lists.items()):
-            self.categories.item(index).setText(f'{name} ({lst.count()})')
+            self.categories.item(index).setText(f'{category_label(name)} ({lst.count()})')
             table=self.tables[name]; table.blockSignals(True); table.setRowCount(lst.count())
             for row in range(lst.count()):
                 source=lst.item(row); path=source.text()
@@ -124,7 +124,7 @@ class StackFilesMixin:
 
     def add(self,name):
         selected=localize('RAW фотоаппаратов и другие файлы (*.*)') if self.bayer.currentData()=='RAW фотоаппарата' else localize('Астроизображения (*.fit *.fits *.fts *.tif *.tiff *.xisf)')
-        paths,_=QFileDialog.getOpenFileNames(self,localize('Выбрать ')+name,str(self.settings.value('stack/folders/'+name,'')),localize(FILTER),selected); l=self.lists[name]
+        paths,_=QFileDialog.getOpenFileNames(self,localize('Выбрать ')+category_label(name),str(self.settings.value('stack/folders/'+name,'')),localize(FILTER),selected); l=self.lists[name]
         if paths:self.settings.setValue('stack/folders/'+name,str(Path(paths[0]).parent))
         existing={l.item(i).text() for i in range(l.count())}
         l.addItems([p for p in paths if p not in existing])
@@ -149,4 +149,3 @@ class StackFilesMixin:
             self.stack_options['hot']=True; self.stack_options['cold']=True
             self.log.appendPlainText(localize('Авто: ')+self.bayer.currentText()+localize(', коррекция горячих и холодных пикселей включена.'))
         except Exception as e: QMessageBox.warning(self,localize('Авто'),str(e))
-

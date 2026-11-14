@@ -7,11 +7,12 @@ from tempfile import TemporaryDirectory
 import gc
 from time import perf_counter
 from .calibration import build_master
+from .defaults import DEFAULT_STACK_OPTIONS
 from .tiling import process_tiles
 import shutil,tempfile
 from datetime import datetime
 from core.master_io import write_master
-from .masters import is_master,check_master_groups
+from .masters import category_label, is_master,check_master_groups
 import numpy as np
 from astropy.io import fits
 import tifffile
@@ -46,7 +47,7 @@ def validate_frames(groups,progress=lambda current,total,phase:None,master_paths
                 data,header=read(path); shape=data.shape; del data
                 records[category].append((path,shape,exposure_seconds(header)))
             except Exception as e:
-                (dark_issues if category=='Darks' else errors).append(localize('{0}: {1}: не удалось прочитать - {2}').format(category, path, e))
+                (dark_issues if category=='Darks' else errors).append(localize('{0}: {1}: не удалось прочитать - {2}').format(category_label(category), path, e))
             done+=1
     lights=records.get('Lights',[])
     if len(groups.get('Lights',[]))<2:errors.append(localize('Нужно минимум два light-кадра.'))
@@ -55,7 +56,7 @@ def validate_frames(groups,progress=lambda current,total,phase:None,master_paths
     for category,items in records.items():
         for path,shape,exposure in items:
             if shape!=expected:
-                (dark_issues if category=='Darks' else errors).append(localize('{0}: {1}: размер {2}, ожидается {3} (высота, ширина, каналы).').format(category, path, shape, expected))
+                (dark_issues if category=='Darks' else errors).append(localize('{0}: {1}: размер {2}, ожидается {3} (высота, ширина, каналы).').format(category_label(category), path, shape, expected))
     for target,calibration,issues in [('Lights','Darks',dark_issues),('Flats','Dark flats',errors)]:
         if target=='Flats' and groups.get('Flats') and is_master(groups['Flats'][0],master_paths):continue
         sources=records.get(target,[]); darks=records.get(calibration,[])
@@ -63,23 +64,13 @@ def validate_frames(groups,progress=lambda current,total,phase:None,master_paths
         exposures=[item[2] for item in sources+darks]
         if any(v is None for v in exposures):
             missing=[str(item[0]) for item in sources+darks if item[2] is None]
-            issues.append(localize('{0} / {1}: невозможно проверить выдержку (нет EXPTIME/EXPOSURE):\n').format(target, calibration)+'\n'.join(missing))
+            issues.append(localize('{0} / {1}: невозможно проверить выдержку (нет EXPTIME/EXPOSURE):\n').format(category_label(target), category_label(calibration))+'\n'.join(missing))
         known=[v for v in exposures if v is not None]
         if known and not all(np.isclose(v,known[0],rtol=1e-4,atol=1e-6) for v in known):
-            issues.append(localize('{0} / {1}: выдержки различаются; дарки вычитаются без масштабирования.\n').format(target, calibration)+'\n'.join(localize('{0}: {1:g} с').format(path, value) for path,shape,value in sources+darks if value is not None))
+            issues.append(localize('{0} / {1}: выдержки различаются; дарки вычитаются без масштабирования.\n').format(category_label(target), category_label(calibration))+'\n'.join(localize('{0}: {1:g} с').format(path, value) for path,shape,value in sources+darks if value is not None))
     progress(total,total,localize('Проверка завершена'))
     return {'errors':errors,'dark_issues':dark_issues}
 
-
-DEFAULT_STACK_OPTIONS = {
-    'auto_resources':True, 'hot':True, 'cold':True, 'device':'cpu', 'drizzle':False, 'drizzle_scale':2, 'pixfrac':0.8, 'method':'mad', 'sigma_low':3., 'sigma_high':3., 'iterations':2,
-    'selection_enabled':False, 'selection_percent':100, 'auto_crop':False, 'auto_crop_rotate':False,
-    'neutralize_rgb':False, 'neutralize_strength':1.0, 'save_masters':True, 'master_dir':'', 'master_method':'median', 'normalize':True, 'align':True,
-    'detection_sigma':5.0, 'control_points':50, 'min_area':5,
-    'skip_failed':False, 'cosmetic_sigma':6.0, 'cache_dir':'',
-    'motion_enabled':False, 'motion_auto':True, 'motion_length':3.0,
-    'motion_angle':0.0, 'motion_regularization':.03, 'motion_strength':.7
-}
 
 def compute_backend(device):
     from core.compatibility import enabled
@@ -158,7 +149,10 @@ def clean_pixels(a, bayer=False, threshold=6.0, hot=True, cold=True):
 
 
 def stack(groups, log=lambda s:None, options=None, progress=lambda current,total,phase:None):
-    options={**DEFAULT_STACK_OPTIONS,**(options or {})}
+    supplied = options or {}
+    options={**DEFAULT_STACK_OPTIONS,**supplied}
+    if 'motion_estimate' not in supplied:
+        options['motion_estimate'] = supplied.get('motion_auto', True)
     plan=plan_resources()
     if options['auto_resources']:
         require_memory(64*MIB,localize('Запуск сложения'))
@@ -171,7 +165,10 @@ def stack(groups, log=lambda s:None, options=None, progress=lambda current,total
     return result
 
 def _stack(groups, log=lambda s:None, options=None, progress=lambda current,total,phase:None):
-    options={**DEFAULT_STACK_OPTIONS,**(options or {})}
+    supplied = options or {}
+    options={**DEFAULT_STACK_OPTIONS,**supplied}
+    if 'motion_estimate' not in supplied:
+        options['motion_estimate'] = supplied.get('motion_auto', True)
     if len(groups.get('Lights',[]))<2: raise ValueError(localize('Нужно минимум два light-кадра.'))
     explicit=options.get('master_paths',())
     check_master_groups(groups,explicit)
@@ -190,6 +187,13 @@ def _stack(groups, log=lambda s:None, options=None, progress=lambda current,tota
         first,meta=read(groups['Lights'][0]); del first
         if not meta.get('RAW_CAMERA'): raise ValueError(localize('Для RAW фотоаппарата выберите исходные RAW-файлы.'))
         pattern=meta['BAYERPAT']
+    cfa_drizzle=bool(options['drizzle'] and options['drizzle_cfa'])
+    if cfa_drizzle:
+        if pattern not in ('RGGB','BGGR','GRBG','GBRG'):
+            raise ValueError(localize('CFA Drizzle требует Bayer-матрицу или исходный RAW; моно и готовый RGB не подходят.'))
+        if options['motion_enabled']:
+            raise ValueError(localize('Для CFA Drizzle отключите коррекцию смаза: она изменяет исходную CFA-матрицу.'))
+        log(localize('CFA Drizzle: калибровка до дебайера; дебайер используется только для поиска звёзд.'))
     hot=options.get('hot',True); cold=options.get('cold',True)
 
     lights=groups['Lights']
@@ -215,14 +219,14 @@ def _stack(groups, log=lambda s:None, options=None, progress=lambda current,tota
         paths=groups[name]
         if not paths: return None
         if is_master(paths[0],explicit):
-            log(localize('Готовый мастер ')+name+': '+Path(paths[0]).name)
+            log(localize('Готовый мастер ')+category_label(name)+': '+Path(paths[0]).name)
             out=disk_array(folder,name.replace(' ','_')+'.npy',shape); out[:]=load(paths[0])
             if normalize:
                 level=np.median(out,axis=(0,1))
                 if np.any(level<=0):raise ValueError(localize('Неположительный сигнал мастер-флета.'))
                 out[:]/=level
             out.flush(); return out
-        log(localize('Мастер ')+name)
+        log(localize('Мастер ')+category_label(name))
         out=disk_array(folder,name.replace(' ', '_')+'.npy',shape)
         return build_master(paths,load,out,folder,options['master_method'],subtract,normalize,log,progress,name)
     if pattern=='Моно' and len(shape)!=2: raise ValueError(localize('Режим Моно требует одноканальные кадры.'))
@@ -233,6 +237,7 @@ def _stack(groups, log=lambda s:None, options=None, progress=lambda current,tota
         color_factor=3 if pattern not in ('Моно','RGB (3 канала)') else 1
         output_factor=options['drizzle_scale']**2 if options['drizzle'] else 1
         needed=frame_bytes*(3+color_factor*(len(lights)+2*output_factor))
+        if cfa_drizzle:needed=frame_bytes*(3+6*output_factor*(len(lights)+1))
         if shutil.disk_usage(cache).free<needed+512*MIB:raise OSError(localize('Недостаточно места для кеша сложения. Выберите другой диск в настройках ресурсов.'))
     temporary=TemporaryDirectory(prefix='astra-stack-',dir=options['cache_dir'] or None)
     try:
@@ -255,8 +260,42 @@ def _stack(groups, log=lambda s:None, options=None, progress=lambda current,tota
                     destination=Path(groups[name][0]).parent
                     path=write_master(destination/(names[name]+'_'+stamp+'.tif'),data,header,name,len(groups[name]),pattern)
                     log(localize('Сохранён мастер: ')+path)
+        motion_options = dict(options)
+        # Old projects used motion_auto=False for fully manual correction.
+        estimate_motion_enabled = options.get('motion_estimate', options['motion_auto'])
+        if (options['motion_enabled'] and options['method'] != 'trails'
+                and estimate_motion_enabled and not options['motion_auto']):
+            from processes.native.motion import estimate_motion
+            estimates = []
+            for i, path in enumerate(lights):
+                if options.get('_cancel', lambda: False)():raise InterruptedError(localize('Отменено'))
+                progress(i, len(lights), localize('Оценка смаза', 'Estimating motion'))
+                sample = load(path)
+                if dark is not None:sample -= dark
+                if flat is not None:sample /= flat
+                if hot or cold:
+                    sample = clean_pixels(sample, pattern not in ('Моно','RGB (3 канала)'), options['cosmetic_sigma'], hot, cold)
+                if pattern not in ('Моно','RGB (3 канала)'):sample = debayer(sample, pattern)
+                try:
+                    estimates.append(estimate_motion(sample, options.get('_cancel', lambda: False)))
+                except ValueError as error:
+                    log(Path(path).name + ': ' + str(error))
+                del sample
+            if estimates:
+                vector = np.mean(np.exp(2j * np.deg2rad([item['angle'] for item in estimates])))
+                if abs(vector) >= .85:
+                    motion_options['motion_length'] = float(np.median([item['length'] for item in estimates]))
+                    motion_options['motion_angle'] = float(np.rad2deg(np.angle(vector) / 2) % 180)
+                else:
+                    motion_options['motion_enabled'] = False
+                    log(localize('Общий смаз не подтверждён: направления различаются.', 'Shared motion not confirmed: directions differ.'))
+            else:
+                motion_options['motion_enabled'] = False
+                log(localize('Общий смаз не подтверждён.', 'Shared motion not confirmed.'))
+        motion_options['motion_auto'] = estimate_motion_enabled and options['motion_auto']
         light_started=perf_counter()
         aligned=[]; aligned_weights=[]; ref=None; drizzlers=[]; accepted=0; common_footprint=None
+        cfa_images=[];cfa_weights=[]
         progress(0,len(lights),localize('Калибровка и совмещение'))
         for i,p in enumerate(lights):
             log(localize('Калибровка и совмещение {0}/{1}: {2}').format(i + 1, len(lights), Path(p).name))
@@ -264,11 +303,35 @@ def _stack(groups, log=lambda s:None, options=None, progress=lambda current,tota
             if dark is not None: a-=dark
             if flat is not None: a/=flat
             if hot or cold: a=clean_pixels(a,pattern not in ('Моно','RGB (3 канала)'),options['cosmetic_sigma'],hot,cold)
+            if cfa_drizzle:
+                from .cfa_drizzle import resample as resample_cfa
+                registration=debayer(a,pattern)
+                transform=None
+                if ref is None:ref=registration.copy()
+                else:
+                    try:
+                        if options['align']:transform=aa.find_transform(registration,ref,detection_sigma=options['detection_sigma'],max_control_points=options['control_points'],min_area=options['min_area'])[0]
+                    except (ValueError,RuntimeError,aa.MaxIterError) as error:
+                        if not options['skip_failed']:raise
+                        log(localize('Пропущен ')+Path(p).name+': '+str(error));continue
+                    if options['normalize']:
+                        offsets=np.median(ref,axis=(0,1))-np.median(registration,axis=(0,1))
+                        for row in range(2):
+                            for col in range(2):a[row::2,col::2]+=offsets['RGB'.index(pattern[row*2+col])]
+                factor=options['drizzle_scale'];outshape=(a.shape[0]*factor,a.shape[1]*factor)
+                def allocate(kind,target_shape):return disk_array(folder,f'cfa_{i:05d}_{kind}.npy',target_shape)
+                stored,weight=resample_cfa(a,pattern,transform,factor,options['pixfrac'],allocate,options.get('_cancel',lambda:False))
+                cfa_images.append(stored);cfa_weights.append(weight)
+                if options['auto_crop']:
+                    from .autocrop import drizzle_footprint
+                    footprint=drizzle_footprint(outshape,a.shape,transform,factor)
+                    common_footprint=footprint if common_footprint is None else common_footprint & footprint
+                accepted+=1;progress(i+1,len(lights),'CFA Drizzle');continue
             if pattern not in ('Моно','RGB (3 канала)'): a=debayer(a,pattern)
             if options['motion_enabled'] and options['method']!='trails':
                 from processes.native.motion import correct_stack_light
                 require_memory(a.size*8*3+128*MIB,localize('Коррекция смаза'))
-                a=correct_stack_light(a,options,log,options.get('_cancel',lambda:False)).astype(np.float32)
+                a=correct_stack_light(a,motion_options,log,options.get('_cancel',lambda:False)).astype(np.float32)
             if options['drizzle']:
                 from drizzle.resample import Drizzle
                 factor=options['drizzle_scale']
@@ -321,7 +384,16 @@ def _stack(groups, log=lambda s:None, options=None, progress=lambda current,tota
             progress(i+1,len(lights),localize('Калибровка и совмещение'))
         if options['drizzle']:
             if accepted<2:raise ValueError(localize('Для drizzle осталось менее двух кадров.'))
-            result=np.stack([d.out_img for d in drizzlers],axis=-1); weight=np.stack([d.out_wht for d in drizzlers],axis=-1)
+            if cfa_drizzle:
+                from .cfa_drizzle import combine as combine_cfa
+                result=disk_array(folder,'cfa_result.npy',cfa_images[0].shape)
+                weight=disk_array(folder,'cfa_coverage.npy',cfa_images[0].shape)
+                def integrate_cfa(top,end):
+                    if options.get('_cancel',lambda:False)():raise InterruptedError(localize('Сложение отменено'))
+                    result[top:end],weight[top:end]=combine_cfa(np.stack([a[top:end] for a in cfa_images]),np.stack([a[top:end] for a in cfa_weights]),options['method'],options['sigma_low'],options['sigma_high'],options['iterations'])
+                process_tiles(result.shape,len(cfa_images)*2,integrate_cfa,progress,log,'CFA Drizzle')
+            else:
+                result=np.stack([d.out_img for d in drizzlers],axis=-1); weight=np.stack([d.out_wht for d in drizzlers],axis=-1)
             if result.shape[-1]==1:result=result[...,0];weight=weight[...,0]
             if options['neutralize_rgb']:neutralize_background(result,options['neutralize_strength'],log)
             if options['auto_crop']:

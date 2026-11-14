@@ -68,6 +68,8 @@ def make_footer(page):
         text=button.text()
         for index,names in enumerate((PREVIEW,RESET,CANCEL,APPLY)):
             if text in names:groups[index].append(button);break
+        else:
+            if button.property('astraFooterApply'):groups[3].append(button)
     if not any(groups):return None
     footer=AdaptiveFooter();footer.setObjectName('actionFooter')
     for index,buttons in enumerate(groups):
@@ -75,6 +77,7 @@ def make_footer(page):
         preferred=({'Предпросмотр','Preview'},{'Сброс','Reset'},{'Отмена','Cancel'},{'Применить','Apply'})[index]
         chosen=next((button for button in buttons if button.text() in preferred),buttons[0] if buttons else None)
         for button in ([chosen] if chosen is not None else []):
+            if index==3:button.setProperty('astraPrimaryAction',True)
             hidden=button.isHidden() and button.objectName()=='starnet_cancel'
             button.setParent(footer);footer.controls.append(button);footer.grid.addWidget(button)
             button.setSizePolicy(QSizePolicy.Preferred,QSizePolicy.Fixed)

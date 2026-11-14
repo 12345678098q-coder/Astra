@@ -63,3 +63,9 @@ English and Russian are available in the application settings. Restart Astra aft
 | **[Скачать портативную версию / Download portable (.zip)](https://github.com/yazdes4/Astra/releases/download/v2.0.0/Astra-Portable-2.0.0.zip)** | Распакуйте архив и откройте `Astra.exe`. / Extract the archive and open `Astra.exe`. |
 
 [Все релизы / All releases](https://github.com/yazdes4/Astra/releases)
+
+## Запуск исходного кода / Running from source
+
+Установите Python 3.12 x64, выполните scripts/install.bat, затем scripts/start.bat. Готовые установщик и portable доступны по ссылкам выше.
+
+Install Python 3.12 x64, run scripts/install.bat, then scripts/start.bat. Prebuilt installer and portable downloads are linked above.
