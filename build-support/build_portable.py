@@ -69,7 +69,8 @@ def stage(folder):
     placeholder=ROOT/'build-support/signal_booster_placeholder.py'
     shutil.copy2(placeholder,folder/'processes/native/signal_booster_ui.py')
     shutil.copy2(ROOT/'core/pixinsight_ui.js',folder/'core/pixinsight_ui.js')
-    for name in ('app.py','requirements.txt','requirements-cuda.txt'):shutil.copy2(ROOT/name,folder/name)
+    shutil.copy2(ROOT/'app.py',folder/'app.py')
+    for name in ('requirements.txt','requirements-cuda.txt'):shutil.copy2(ROOT/'build-support'/name,folder/name)
     # Inference only; training data and experimental weights are not bundled.
     (folder/'PaletteLab').mkdir()
     for name in ('engine.py','backend.py','editor_model.py','colour_controls.py','display_stretch.py','locale_support.py'):
