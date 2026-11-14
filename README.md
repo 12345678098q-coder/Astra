@@ -55,11 +55,11 @@ English and Russian are available in the application settings. Restart Astra aft
 
 ## Скачать Astra / Download Astra
 
-**Astra 1.1.5 · Windows x64**
+**Astra 2.0.0 · Windows x64**
 
 | Файл / File | Как запустить / How to run |
 | --- | --- |
-| **[Скачать установщик / Download installer (.exe)](https://github.com/yazdes4/Astra/releases/download/v1.1.5/Astra-Setup-1.1.5.exe)** | Запустите установщик. / Run the installer. |
-| **[Скачать портативную версию / Download portable (.zip)](https://github.com/yazdes4/Astra/releases/download/v1.1.5/Astra-Portable-1.1.5.zip)** | Распакуйте архив и откройте `Astra.exe`. / Extract the archive and open `Astra.exe`. |
+| **[Скачать установщик / Download installer (.exe)](https://github.com/yazdes4/Astra/releases/download/v2.0.0/Astra-Setup-2.0.0.exe)** | Запустите установщик. / Run the installer. |
+| **[Скачать портативную версию / Download portable (.zip)](https://github.com/yazdes4/Astra/releases/download/v2.0.0/Astra-Portable-2.0.0.zip)** | Распакуйте архив и откройте `Astra.exe`. / Extract the archive and open `Astra.exe`. |
 
 [Все релизы / All releases](https://github.com/yazdes4/Astra/releases)
